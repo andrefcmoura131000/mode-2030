@@ -98,8 +98,10 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     });
     setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
   }).catch((e) => console.warn('SW', e));
+  // Recarrega só quando uma versão nova substitui a antiga (não na primeira instalação).
+  const hadController = !!navigator.serviceWorker.controller;
   let reloading = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloading) { reloading = true; location.reload(); } });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloading) { reloading = true; location.reload(); } });
 }
 
 (async () => {
