@@ -1,0 +1,23 @@
+{
+  "name": "MODE 2030",
+  "short_name": "MODE 2030",
+  "description": "Treino de hipertrofia, alimentação, água, peso e suplementos.",
+  "lang": "pt-PT",
+  "start_url": "./#hoje",
+  "scope": "./",
+  "id": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["health", "fitness", "lifestyle"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Começar treino", "url": "./#hoje", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Registar alimentação", "url": "./#comida", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

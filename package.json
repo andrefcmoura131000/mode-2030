@@ -1,0 +1,11 @@
+{
+  "name": "mode-2030",
+  "private": true,
+  "type": "module",
+  "description": "MODE 2030 — PWA pessoal de treino, alimentação, água, peso e suplementos. Sem dependências.",
+  "scripts": {
+    "test": "node --test tests/logic.test.mjs",
+    "build": "node tools/build-sw.mjs",
+    "serve": "node tools/serve.mjs"
+  }
+}
