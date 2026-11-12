@@ -54,6 +54,9 @@ const P = {
   flag: '<path d="M5 21V4h11l-2 4 2 4H5"/>',
   moon: '<path d="M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10Z"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+  flame: '<path d="M12 21a6 6 0 0 0 6-6c0-4-3-6-4-10-2 2-3 4-3 6-1-1-2-2-2-4-2 2-3 5-3 8a6 6 0 0 0 6 6Z"/>',
+  stretch: '<circle cx="12" cy="4.5" r="1.8"/><path d="M5 9h14M12 9v5l-4 7M12 14l4 7"/>',
+  bolt: '<path d="M13 3 5 13h6l-1 8 8-10h-6Z"/>',
 };
 export const icon = (name, cls = '') =>
   `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;
@@ -118,21 +121,23 @@ export function unlockAudio() {
     if (actx.state === 'suspended') actx.resume();
   } catch { /* sem áudio */ }
 }
-export function beep() {
+/** end: fim do descanso · go: começa a contar · tick: fim de uma posição */
+const TONES = { end: [[0, 880], [0.22, 880], [0.44, 1320]], go: [[0, 1320]], tick: [[0, 880], [0.2, 880]] };
+export function beep(kind = 'end') {
   if (!S.cfg?.sound || !actx) return;
   const t = actx.currentTime;
-  [0, 0.22, 0.44].forEach((d, i) => {
+  for (const [d, hz] of TONES[kind] || TONES.end) {
     const o = actx.createOscillator();
     const g = actx.createGain();
     o.type = 'sine';
-    o.frequency.value = i === 2 ? 1320 : 880;
+    o.frequency.value = hz;
     g.gain.setValueAtTime(0.0001, t + d);
     g.gain.exponentialRampToValueAtTime(0.25, t + d + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.18);
     o.connect(g).connect(actx.destination);
     o.start(t + d);
     o.stop(t + d + 0.2);
-  });
+  }
 }
 
 /* ---------- Ecrã sempre ligado durante o treino ---------- */

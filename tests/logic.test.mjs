@@ -137,3 +137,112 @@ test('todas as fotos dos exercícios existem', async () => {
   }
   for (const t of c.templates) for (const i of t.items) assert.ok(c.exercises[i.exerciseId], i.exerciseId);
 });
+
+/* ---------- v2: base de alimentos, migração, aquecimento e alongamentos ---------- */
+import { FOOD_DB, FOOD_CATS } from '../js/foods-db.js';
+import { migrateConfig, defaultRoutine, SCHEMA_VERSION } from '../js/seed.js';
+import { guideStart, guideAdvance, guidePause, guideResume, guideSteps, doseText, routineMinutes, normText, recentFoods, GUIDE_PREP } from '../js/logic.js';
+
+test('base de alimentos: ids únicos, categorias válidas, porções e calorias coerentes com as macros', () => {
+  const ids = new Set();
+  const cats = new Set(FOOD_CATS.map(([k]) => k));
+  assert.ok(FOOD_DB.length >= 150, `só ${FOOD_DB.length} alimentos`);
+  for (const f of FOOD_DB) {
+    assert.ok(!ids.has(f.id), `id repetido ${f.id}`);
+    ids.add(f.id);
+    assert.ok(cats.has(f.cat), `${f.id}: categoria ${f.cat}`);
+    assert.ok(['g', 'ml', 'un'].includes(f.basis), f.id);
+    for (const p of f.portions || []) assert.ok(p.qty > 0 && p.label, `${f.id}: porção`);
+    // Atwater (4/4/9, álcool 7): tolerância de 15% ou 12 kcal (fibra e arredondamentos)
+    const atw = 4 * f.p + 4 * f.c + 9 * f.f + 7 * (f.al || 0);
+    assert.ok(Math.abs(atw - f.kcal) <= Math.max(12, 0.15 * f.kcal), `${f.name}: ${f.kcal} kcal vs ${atw.toFixed(0)} pelas macros`);
+  }
+});
+
+test('migração v1 → v2: acrescenta alimentos e rotinas sem estragar o que o utilizador mudou', () => {
+  const old = {
+    version: 1, startDate: '2026-11-09',
+    foods: {
+      aveia: { id: 'aveia', name: 'Aveia (minha)', basis: 'g', kcal: 370, p: 14, c: 58, f: 7 },
+      ovo: { id: 'ovo', name: 'Ovo', basis: 'un', kcal: 75, p: 6.5, c: 0.5, f: 5 },
+      c_x: { id: 'c_x', name: 'Iogurte da marca', basis: 'g', kcal: 60, p: 10, c: 4, f: 0, custom: true },
+    },
+    templates: [{ id: 'pushA', name: 'Push A', weekday: 1, items: [] }, { id: 't1', name: 'Pernas extra', weekday: 0, items: [] }],
+    meals: [], supplements: [],
+  };
+  const c = migrateConfig(old);
+  assert.equal(c.version, SCHEMA_VERSION);
+  assert.equal(c.foods.aveia.name, 'Aveia (minha)', 'não apaga edições');
+  assert.equal(c.foods.aveia.kcal, 370);
+  assert.equal(c.foods.aveia.cat, 'amido');
+  assert.ok(c.foods.aveia.portions.length, 'ganha porções');
+  assert.equal(c.foods.c_x.cat, 'outros');
+  assert.ok(c.foods.pao_mistura, 'alimentos novos');
+  assert.ok(Object.keys(c.foods).length >= 150);
+  assert.ok(c.mobility.chest_door);
+  assert.deepEqual(c.templates[0].warmup, defaultRoutine('Push A').warmup);
+  assert.deepEqual(c.templates[1].cooldown, defaultRoutine('legs').cooldown, 'treino próprio com "pernas" leva alongamentos de pernas');
+  // correr outra vez não muda nada
+  const snap = JSON.stringify(c);
+  assert.equal(JSON.stringify(migrateConfig(c)), snap);
+});
+
+test('todos os treinos do plano têm aquecimento e alongamentos que existem', () => {
+  const c = cfg();
+  for (const t of c.templates) {
+    assert.ok(t.warmup.length >= 5 && t.cooldown.length >= 5, t.name);
+    for (const id of [...t.warmup, ...t.cooldown]) assert.ok(c.mobility[id], `${t.name}: ${id}`);
+    for (const id of t.warmup) assert.equal(c.mobility[id].kind, 'warm', id);
+    for (const id of t.cooldown) assert.equal(c.mobility[id].kind, 'stretch', id);
+  }
+  const legs = c.templates.find((t) => t.id === 'legsA');
+  const min = routineMinutes(legs.cooldown.map((id) => c.mobility[id]));
+  assert.ok(min >= 6 && min <= 15, `alongamentos de pernas ~${min} min`);
+});
+
+test('texto da dose', () => {
+  assert.equal(doseText({ unit: 's', val: 300, side: false }), '5 min');
+  assert.equal(doseText({ unit: 's', val: 30, side: true }), '30 s por lado');
+  assert.equal(doseText({ unit: 'reps', val: 10, side: true }), '10 reps por lado');
+});
+
+test('modo guiado: preparação, tempo, troca de lado, reps à espera e fim', () => {
+  const moves = [
+    { id: 'a', unit: 's', val: 30, side: true },
+    { id: 'b', unit: 'reps', val: 10, side: false },
+    { id: 'c', unit: 's', val: 40, side: false },
+  ];
+  assert.equal(guideSteps(moves).length, 4);
+  assert.equal(guideSteps(moves, { a: 1 }).length, 2, 'salta os já feitos');
+  let g = guideStart('cool', moves, {}, 0);
+  assert.equal(g.phase, 'prep');
+  assert.equal(g.end, GUIDE_PREP * 1000);
+  let r = guideAdvance(g, 5000); // fim da preparação
+  assert.equal(r.g.phase, 'go'); assert.equal(r.g.end, 35000); assert.equal(r.done, null);
+  r = guideAdvance(r.g, 35000); // lado esquerdo feito → troca de lado (3 s)
+  assert.equal(r.done, null); assert.equal(r.g.phase, 'prep'); assert.equal(r.g.total, 3);
+  r = guideAdvance(r.g, 38000);
+  r = guideAdvance(r.g, 68000); // lado direito feito
+  assert.equal(r.done, 'a');
+  assert.equal(r.g.phase, 'go'); assert.equal(r.g.end, null, 'reps: sem contagem, espera pelo Feito');
+  r = guideAdvance(r.g, 90000);
+  assert.equal(r.done, 'b'); assert.equal(r.g.phase, 'prep');
+  r = guideAdvance(r.g, 95000);
+  const paused = guidePause(r.g, 100000);
+  assert.equal(paused.end, null); assert.equal(paused.left, 35000);
+  const resumed = guideResume(paused, 200000);
+  assert.equal(resumed.end, 235000);
+  r = guideAdvance(resumed, 235000);
+  assert.equal(r.done, 'c'); assert.equal(r.g, null, 'fim');
+  assert.equal(guideStart('warm', moves, { a: 1, b: 1, c: 1 }, 0), null);
+});
+
+test('pesquisa sem acentos e alimentos recentes', () => {
+  assert.equal(normText('Pão de Mistura'), 'pao de mistura');
+  const foods = { a: {}, b: {}, c: {} };
+  const days = {
+    '2026-11-10': { food: [{ foodId: 'a', qty: 100 }, { foodId: 'b', qty: 2 }] },
+    '2026-11-11': { food: [{ foodId: 'a', qty: 150 }, { foodId: null, qty: 1 }, { foodId: 'zz', qty: 1 }] },
+  };
+  assert.deepEqual(recentFoods(days, foods), [{ foodId: 'a', qty: 150 }, { foodId: 'b', qty: 2 }]);
+});

@@ -1,6 +1,6 @@
 // Armazenamento local em IndexedDB (uma tabela chave → valor) e estado em memória.
 // Chaves: config · active · day:AAAA-MM-DD · session:<id> · photo:<exerciseId>
-import { seedConfig, SCHEMA_VERSION } from './seed.js';
+import { seedConfig, migrateConfig, SCHEMA_VERSION } from './seed.js';
 
 const DB_NAME = 'mode2030';
 const STORE = 'kv';
@@ -53,20 +53,16 @@ function ingest(entries) {
 
 export async function load() {
   db = await openDB();
-  ingest(await allEntries());
-  if (!S.cfg) {
-    S.cfg = seedConfig();
-    await put('config', S.cfg);
-  } else migrate(S.cfg);
+  await reload();
 }
 
-export async function reload() { ingest(await allEntries()); if (!S.cfg) { S.cfg = seedConfig(); await put('config', S.cfg); } }
-
-function migrate(cfg) {
-  // Garante campos novos em configurações antigas (versões futuras acrescentam aqui).
-  const base = seedConfig();
-  for (const k of Object.keys(base)) if (cfg[k] === undefined) cfg[k] = base[k];
-  cfg.version = SCHEMA_VERSION;
+/** Lê tudo da base de dados; cria ou atualiza a configuração (também depois de importar um backup antigo). */
+export async function reload() {
+  ingest(await allEntries());
+  if (!S.cfg) { S.cfg = seedConfig(); await put('config', S.cfg); return; }
+  const before = S.cfg.version;
+  migrateConfig(S.cfg);
+  if (before !== SCHEMA_VERSION) await put('config', S.cfg);
 }
 
 export const sortSessions = () => S.sessions.sort((a, b) => b.startedAt - a.startedAt);

@@ -359,6 +359,44 @@ input[type="date"].input { color-scheme: dark; }
 .meal-k { margin-left: auto; }
 .meal-ed { padding: 8px 0; border-bottom: 0.5px solid var(--s3); }
 
+.pick-head { margin-bottom: 8px; }
+.pick-head .sheet-title { margin: 0; white-space: nowrap; }
+.pick-head select { width: auto; min-height: 40px; font-size: 15px; color: var(--gold); }
+.cat-chips { flex-wrap: nowrap; overflow-x: auto; margin: 0 -18px 6px; padding: 0 18px 4px; scrollbar-width: none; }
+.cat-chips::-webkit-scrollbar { display: none; }
+.cat-chips .chip { flex: none; min-height: 34px; padding: 0 12px; font-size: 13px; }
+.pick-row { display: flex; align-items: center; gap: 8px; border-bottom: 0.5px solid var(--s3); }
+.pick-row:last-child { border-bottom: 0; }
+.pick-main { flex: 1; min-width: 0; min-height: 56px; padding: 8px 2px; background: none; border: 0; text-align: left; color: var(--tx); cursor: pointer; }
+.chip-add { flex: none; min-height: 34px; padding: 0 10px; font-size: 12.5px; color: var(--gold); border-color: var(--gold-dim); }
+.chip-add.done { background: var(--gold-bg); border-color: var(--gold); }
+.chip-add .ic { width: 16px; height: 16px; }
+.back-b { margin: -6px 0 6px -8px; padding: 0 8px; min-height: 36px; }
+.portion-step { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px; border-radius: 14px; background: var(--s2); }
+.portion-step .tnum { flex: 1; text-align: center; color: var(--gold); }
+.portion-ed { margin-top: 8px; }
+.portion-ed .input:first-child { flex: 1; min-width: 0; min-height: 40px; }
+.mb { margin-bottom: 12px; }
+.tag-xs { font-size: 10.5px; padding: 1px 7px; vertical-align: 1px; }
+
+/* Aquecimento e alongamentos (modo treino) */
+.seg-r { flex: 0.55; }
+.seg-r::after { background: var(--line2); }
+.stage-hero { margin-top: 4px; }
+.stage-hero .ex-name { margin-top: 6px; font-size: 26px; }
+.mob-list { margin-top: 10px; }
+.mob-list .check-row { align-items: flex-start; padding: 10px 2px; }
+.mob-list .check-box { margin-top: 1px; }
+.mob-list .check-row.cur .check-txt { color: var(--gold); }
+.dose { white-space: nowrap; padding-top: 2px; }
+.guide { margin-top: 12px; padding: 16px; border-radius: 20px; border: 0.5px solid var(--gold-dim); background: var(--s1); text-align: center; animation: rise .3s var(--ease); }
+.guide-name { font-size: 20px; margin: 6px 0 4px; }
+.guide .rest-ring { width: 170px; height: 170px; margin: 10px auto; }
+.rest-ring.prep .ring-fg { stroke: var(--mut2); }
+.guide-reps { font-size: 44px; margin: 14px 0; }
+.guide-reps .mut { font-size: 16px; }
+.mob-ed { min-height: 52px; }
+
 /* Definições */
 .tpl-item { padding: 12px 0; border-bottom: 0.5px solid var(--s3); }
 .tpl-item .field { margin-bottom: 0; }

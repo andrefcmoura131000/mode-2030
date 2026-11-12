@@ -115,7 +115,89 @@ export function sessionStats(s) {
   return { sets, volume, duration: ((s.endedAt || Date.now()) - s.startedAt) / 1000 };
 }
 
+/* ---------- Aquecimento e alongamentos ---------- */
+
+export const GUIDE_PREP = 5;  // segundos para entrar na posição seguinte
+export const GUIDE_SWITCH = 3; // segundos para trocar de lado
+
+/** "10 por lado", "30 s", "5 min" */
+export function doseText(m) {
+  if (!m) return '';
+  const v = m.unit === 's' ? (m.val >= 60 && m.val % 60 === 0 ? `${m.val / 60} min` : `${m.val} s`) : `${m.val} reps`;
+  return m.side ? `${v} por lado` : v;
+}
+
+/** Duração estimada em minutos (reps a ~3 s cada, mais transições). */
+export function routineMinutes(moves) {
+  let s = 0;
+  for (const m of moves) {
+    if (!m) continue;
+    const one = m.unit === 's' ? m.val : m.val * 3;
+    s += one * (m.side ? 2 : 1) + (m.side ? GUIDE_SWITCH : 0) + GUIDE_PREP;
+  }
+  return Math.max(1, Math.round(s / 60));
+}
+
+/** Passos do modo guiado: movimentos com tempo e por lado dão dois passos (esquerdo, direito). */
+export function guideSteps(moves, done = {}) {
+  const steps = [];
+  for (const m of moves) {
+    if (!m || done[m.id]) continue;
+    const secs = m.unit === 's' ? m.val : null;
+    if (secs && m.side) steps.push({ id: m.id, side: 0, secs }, { id: m.id, side: 1, secs });
+    else steps.push({ id: m.id, side: null, secs, reps: secs ? null : m.val });
+  }
+  return steps;
+}
+
+const enter = (g, s, now) => {
+  const st = g.steps[s];
+  if (!st.secs) return { ...g, s, phase: 'go', total: 0, end: null, left: null }; // reps: espera pelo "Feito"
+  const prev = g.steps[s - 1];
+  const prep = prev && prev.id === st.id ? GUIDE_SWITCH : GUIDE_PREP;
+  return { ...g, s, phase: 'prep', total: prep, end: now + prep * 1000, left: null };
+};
+
+export function guideStart(k, moves, done, now) {
+  const steps = guideSteps(moves, done);
+  if (!steps.length) return null;
+  return enter({ k, steps }, 0, now);
+}
+
+/** Avança um passo. Devolve { g: estado seguinte ou null no fim, done: id do movimento concluído ou null }. */
+export function guideAdvance(g, now) {
+  const st = g.steps[g.s];
+  if (g.phase === 'prep') return { g: { ...g, phase: 'go', total: st.secs, end: now + st.secs * 1000, left: null }, done: null };
+  const done = st.side === 0 ? null : st.id;
+  if (g.s + 1 >= g.steps.length) return { g: null, done };
+  return { g: enter(g, g.s + 1, now), done };
+}
+
+export function guidePause(g, now) { return g.end ? { ...g, left: Math.max(0, g.end - now), end: null } : g; }
+export function guideResume(g, now) { return g.left != null ? { ...g, end: now + g.left, left: null } : g; }
+
 /* ---------- Nutrição ---------- */
+
+/** Texto para pesquisa: minúsculas e sem acentos. */
+export const normText = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+/**
+ * Alimentos usados recentemente (mais recentes primeiro), com a última quantidade.
+ * days: { 'AAAA-MM-DD': { food: [...] } }
+ */
+export function recentFoods(days, foods, limit = 15) {
+  const out = new Map();
+  for (const k of Object.keys(days).sort().reverse()) {
+    const list = days[k]?.food || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const e = list[i];
+      if (!e.foodId || !foods[e.foodId] || out.has(e.foodId)) continue;
+      out.set(e.foodId, { foodId: e.foodId, qty: e.qty });
+      if (out.size >= limit) return [...out.values()];
+    }
+  }
+  return [...out.values()];
+}
 
 export function macrosFor(food, qty) {
   const k = food.basis === 'un' ? qty : qty / 100;

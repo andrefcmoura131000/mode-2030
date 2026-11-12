@@ -64,8 +64,9 @@ Depois ativar o Pages como nos passos 7–9 da opção A.
 
 1. **Definições → Plano e descanso**: confirmar a **data de início** (por defeito é o dia em que a app foi aberta pela primeira vez).
 2. **Definições → Exercícios**: ajustar o incremento de cada exercício ao material do ginásio (barra 2,5 kg; halteres 2 kg; polias/máquinas 5 kg por defeito).
-3. **Definições → Base de alimentos**: confirmar os valores com os rótulos.
-4. Exportar o primeiro backup em **Definições → Backup → Exportar e guardar no Drive**.
+3. **Definições → Base de alimentos**: ~180 alimentos com valores médios de referência, por categorias e com porções. Quando houver rótulo, corrigir aqui.
+4. **Definições → Plano de treino → (treino)**: escolher o aquecimento e os alongamentos de cada treino (biblioteca em **Definições → Aquecimento e alongamentos**).
+5. Exportar o primeiro backup em **Definições → Backup → Exportar e guardar no Drive**.
 
 ## 3. Atualizar a app depois de alterações
 
@@ -91,6 +92,7 @@ npm run serve
 
 - `js/logic.js` — regras (semanas, readaptação, progressão dupla, macros, regra do peso), testadas em `tests/`.
 - `js/store.js` — IndexedDB (chave → valor: `config`, `active`, `day:AAAA-MM-DD`, `session:<id>`, `photo:<id>`).
-- `js/seed.js` — plano de treino, alimentos, refeições e suplementos iniciais.
+- `js/seed.js` — plano de treino, aquecimento e alongamentos, refeições e suplementos iniciais; `migrateConfig` atualiza dados antigos.
+- `js/foods-db.js` — base de alimentos (valores médios de referência, categorias, porções).
 - `js/views/` — um ficheiro por separador; `sessao.js` é o modo treino.
 - `tools/build-sw.mjs` — gera o service worker com a lista de ficheiros e a versão.

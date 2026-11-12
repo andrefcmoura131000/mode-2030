@@ -1,6 +1,6 @@
 // Ecrã "Hoje": treino do dia, macros, água, suplementos e lembrete de backup.
 import { S } from '../store.js';
-import { phase, templateFor, sessionStats } from '../logic.js';
+import { phase, templateFor, sessionStats, routineMinutes } from '../logic.js';
 import { dateKey, longDate, esc, mmss, daysBetween } from '../util.js';
 import { icon, exThumb } from '../ui.js';
 import { nutritionCard, waterCard, suppCard } from '../widgets.js';
@@ -31,6 +31,9 @@ function workoutCard(date) {
   }
   const done = doneToday.find((s) => s.templateId === tpl.id);
   const n = tpl.items.length;
+  const mv = (ids) => (ids || []).map((id) => S.cfg.mobility?.[id]).filter(Boolean);
+  const wMin = mv(tpl.warmup).length ? routineMinutes(mv(tpl.warmup)) : 0;
+  const cMin = mv(tpl.cooldown).length ? routineMinutes(mv(tpl.cooldown)) : 0;
   const thumbs = tpl.items.slice(0, 6).map((i) => S.cfg.exercises[i.exerciseId]).filter(Boolean).map(exThumb).join('');
   if (done) {
     const st = sessionStats(done);
@@ -41,7 +44,8 @@ function workoutCard(date) {
   return `<section class="card card-hero">
     <div class="row-sb"><span class="lbl">Treino de hoje</span><span class="tag ${ph.readapt ? 'tag-gold' : ''}">${ph.week ? `Semana ${ph.week}` : 'Antes do início'}${ph.readapt ? ' · readaptação' : ''}</span></div>
     <div class="hero-title">${esc(tpl.name)}</div>
-    <div class="mut">${n} exercícios · ~60 min · ${ph.rir} reps em reserva${ph.readapt ? ` · ${S.cfg.readapt.sets} séries` : ''}</div>
+    <div class="mut">${n} exercícios · ~${60 + wMin + cMin} min · ${ph.rir} reps em reserva${ph.readapt ? ` · ${S.cfg.readapt.sets} séries` : ''}</div>
+    ${wMin || cMin ? `<div class="mut small">${[wMin ? `aquecimento ~${wMin} min` : '', cMin ? `alongamentos ~${cMin} min` : ''].filter(Boolean).join(' · ')} incluídos</div>` : ''}
     <div class="thumbs">${thumbs}</div>
     ${S.active ? `<a class="btn btn-gold btn-xl btn-block" href="#sessao">${icon('play')} Continuar treino</a>`
                : `<button class="btn btn-gold btn-xl btn-block" data-act="start" data-id="${tpl.id}">${icon('play')} Começar treino</button>`}

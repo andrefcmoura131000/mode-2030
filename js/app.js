@@ -2,6 +2,7 @@
 import { S, load, saveActive } from './store.js';
 import { setRenderer, animate, closeAllSheets, toast, keepAwake } from './ui.js';
 import { dateKey } from './util.js';
+import { normText } from './logic.js';
 import * as widgets from './widgets.js';
 import * as hoje from './views/hoje.js';
 import * as treino from './views/treino.js';
@@ -62,6 +63,13 @@ document.addEventListener('change', (ev) => {
 /* Rascunho da série guardado ao escrever */
 document.addEventListener('input', (ev) => {
   const el = ev.target;
+  /* Filtro de listas nas páginas (data-filter → linhas com data-fname, grupos com data-grp) */
+  if (el.dataset && 'filter' in el.dataset) {
+    const words = normText(el.value.trim()).split(/\s+/).filter(Boolean);
+    view.querySelectorAll('[data-fname]').forEach((r) => { r.style.display = words.every((w) => r.dataset.fname.includes(w)) ? '' : 'none'; });
+    view.querySelectorAll('[data-grp]').forEach((g) => { g.style.display = [...g.querySelectorAll('[data-fname]')].some((r) => r.style.display !== 'none') ? '' : 'none'; });
+    return;
+  }
   if (el.dataset?.draft && S.active) {
     const v = el.value.trim();
     S.active.draft[el.dataset.draft] = v === '' ? '' : el.dataset.draft === 'kg' ? parseFloat(v.replace(',', '.')) : parseInt(v, 10);

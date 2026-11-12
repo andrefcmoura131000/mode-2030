@@ -1,7 +1,8 @@
 // Definições: plano, metas, treino, exercícios, alimentos, refeições, suplementos, backup e dados.
 import { S, saveCfg, allEntries, replaceAll, reload, setPhoto } from '../store.js';
-import { phase } from '../logic.js';
-import { SLOTS, SUPP_MOMENTS, seedConfig } from '../seed.js';
+import { phase, doseText, routineMinutes, normText } from '../logic.js';
+import { SLOTS, SUPP_MOMENTS, seedConfig, defaultRoutine } from '../seed.js';
+import { FOOD_CATS } from '../foods-db.js';
 import { dateKey, longDate, esc, fmt, fmtKg, num, uid, DIAS } from '../util.js';
 import { icon, openSheet, closeSheet, field, numInput, textInput, selectInput, toast, confirmDialog, go, render, exThumb, resizeImage } from '../ui.js';
 import { foodEditor } from './comida.js';
@@ -24,6 +25,7 @@ function home() {
       ${item('#definicoes/metas', 'food', 'Metas diárias', `${fmt(S.cfg.goals.kcal)} kcal · P ${S.cfg.goals.p} · H ${S.cfg.goals.c} · G ${S.cfg.goals.f} · água`)}
       ${item('#definicoes/treino', 'barbell', 'Plano de treino', `${S.cfg.templates.length} treinos · séries e gamas`)}
       ${item('#definicoes/exercicios', 'camera', 'Exercícios', 'Tipo, incremento, foto')}
+      ${item('#definicoes/mobilidade', 'stretch', 'Aquecimento e alongamentos', `${Object.keys(S.cfg.mobility || {}).length} movimentos · tempo, reps, indicações`)}
       ${item('#definicoes/alimentos', 'search', 'Base de alimentos', `${Object.keys(S.cfg.foods).length} alimentos`)}
       ${item('#definicoes/refeicoes', 'list', 'Refeições do plano', 'Quantidades de cada refeição')}
       ${item('#definicoes/suplementos', 'pill', 'Suplementos', `${S.cfg.supplements.length} na lista diária`)}
@@ -92,9 +94,38 @@ function treinoEdit(id) {
       <p class="mut small">Mín./Máx. = gama de repetições (no Plank, segundos).</p>
       ${rows}
       <button class="btn btn-block mt-s" data-act="d-tpl-add">${icon('plus')} Adicionar exercício</button>
+      ${mobSection('warmup', 'Aquecimento (antes)', 'warm')}
+      ${mobSection('cooldown', 'Alongamentos (no fim)', 'stretch')}
       <button class="btn btn-gold btn-block mt" data-act="d-tpl-save">Guardar treino</button>
       <button class="btn btn-ghost btn-block mt-s danger" data-act="d-tpl-del">${icon('trash')} Apagar treino</button>
     </section>`;
+}
+
+function mobSection(key, title, kind) {
+  const ids = tplDraft[key] || [];
+  const moves = ids.map((id) => S.cfg.mobility[id]).filter(Boolean);
+  const opts = Object.values(S.cfg.mobility).filter((m) => m.kind === kind && !ids.includes(m.id)).sort((a, b) => a.name.localeCompare(b.name)).map((m) => [m.id, m.name]);
+  return `<div class="lbl mt">${title} · ~${moves.length ? routineMinutes(moves) : 0} min</div>
+    <div class="list">${ids.map((id, i) => {
+      const m = S.cfg.mobility[id];
+      return m ? `<div class="list-row mob-ed"><span class="list-main">${esc(m.name)}<span class="mut small block">${doseText(m)}</span></span>
+        <button class="icon-btn sm" data-act="d-tpl-mob-mv" data-k="${key}" data-i="${i}" data-d="-1" aria-label="Subir" ${i === 0 ? 'disabled' : ''}>${icon('up')}</button>
+        <button class="icon-btn sm danger" data-act="d-tpl-mob-rm" data-k="${key}" data-i="${i}" aria-label="Retirar">${icon('x')}</button></div>` : '';
+    }).join('')}</div>
+    ${opts.length ? `<div class="row-g mt-s">${selectInput('mob_' + key, opts, '')}<button class="btn btn-sm" data-act="d-tpl-mob-add" data-k="${key}" aria-label="Acrescentar">${icon('plus')}</button></div>` : ''}`;
+}
+
+function mobilidade() {
+  const all = Object.values(S.cfg.mobility || {});
+  const group = (kind, title) => {
+    const rows = all.filter((m) => m.kind === kind).sort((a, b) => a.name.localeCompare(b.name)).map((m) =>
+      `<button class="list-row" data-act="d-mob" data-id="${m.id}"><span class="list-main">${esc(m.name)}<span class="mut small block">${doseText(m)}${m.cue ? ' · ' + esc(m.cue) : ''}</span></span>${icon('edit', 'ic-mut')}</button>`).join('');
+    return `<section class="card"><div class="lbl">${title}</div><div class="list">${rows || '<p class="mut">Nenhum.</p>'}</div>
+      <button class="btn btn-block mt" data-act="d-mob" data-id="" data-kind="${kind}">${icon('plus')} Novo</button></section>`;
+  };
+  return `${back('#definicoes', 'Aquecimento e alongamentos')}
+    <p class="mut small">Aquecimento: mobilidade dinâmica antes dos exercícios. Alongamentos: estáticos no fim, 30–60 s por posição. Para escolher os que entram em cada treino: Plano de treino → abrir o treino.</p>
+    ${group('warm', 'Aquecimento')}${group('stretch', 'Alongamentos')}`;
 }
 
 function exercicios() {
@@ -106,11 +137,17 @@ function exercicios() {
 }
 
 function alimentos() {
-  const rows = Object.values(S.cfg.foods).sort((a, b) => a.name.localeCompare(b.name)).map((f) =>
-    `<button class="list-row" data-act="d-food" data-id="${f.id}"><span class="list-main">${esc(f.name)}<span class="mut small block tnum">${f.basis === 'un' ? 'por unidade' : 'por 100 ' + f.basis}: ${fmt(f.kcal)} kcal · P ${fmt(f.p, 1)} · H ${fmt(f.c, 1)} · G ${fmt(f.f, 1)}</span></span>${icon('edit', 'ic-mut')}</button>`).join('');
+  const foods = Object.values(S.cfg.foods);
+  const row = (f) => `<button class="list-row" data-act="d-food" data-id="${f.id}" data-fname="${esc(normText(f.name))}"><span class="list-main">${esc(f.name)}${f.custom ? ' <span class="tag tag-xs">meu</span>' : ''}<span class="mut small block tnum">${f.basis === 'un' ? 'por unidade' : 'por 100 ' + f.basis}: ${fmt(f.kcal)} kcal · P ${fmt(f.p, 1)} · H ${fmt(f.c, 1)} · G ${fmt(f.f, 1)}${f.portions?.length ? ` · ${f.portions.map((p) => esc(p.label)).join(', ')}` : ''}</span></span>${icon('edit', 'ic-mut')}</button>`;
+  const groups = FOOD_CATS.map(([k, label]) => {
+    const list = foods.filter((f) => (f.cat || 'outros') === k).sort((a, b) => a.name.localeCompare(b.name));
+    return list.length ? `<section class="card" data-grp><div class="lbl">${label} · ${list.length}</div><div class="list">${list.map(row).join('')}</div></section>` : '';
+  }).join('');
   return `${back('#definicoes', 'Base de alimentos')}
-    <div class="banner banner-info">${icon('info')}<span>Valores aproximados. Confirmar com o rótulo de cada embalagem e corrigir aqui.</span></div>
-    <section class="card"><div class="list">${rows}</div><button class="btn btn-block mt" data-act="d-food" data-id="">${icon('plus')} Novo alimento</button></section>`;
+    <div class="banner banner-info">${icon('info')}<span>Valores médios de referência, aproximados: por 100 g de parte comestível, em cru salvo indicação. Quando houver rótulo, corrigir aqui.</span></div>
+    <div class="search">${icon('search')}<input class="input" placeholder="Procurar em ${foods.length} alimentos" data-filter autocomplete="off"></div>
+    <button class="btn btn-gold btn-block mb" data-act="d-food" data-id="">${icon('plus')} Novo alimento</button>
+    ${groups}`;
 }
 
 function refeicoes() {
@@ -174,6 +211,7 @@ export function render_(args = []) {
     case 'metas': return metas();
     case 'treino': return q ? treinoEdit(q) : treinoList();
     case 'exercicios': return exercicios();
+    case 'mobilidade': return mobilidade();
     case 'alimentos': return alimentos();
     case 'refeicoes': return refeicoes();
     case 'suplementos': return suplementos();
@@ -239,7 +277,7 @@ export const actions = {
   },
   'd-tpl-new'() {
     const id = 't_' + uid();
-    S.cfg.templates.push({ id, name: 'Novo treino', weekday: 0, items: [] });
+    S.cfg.templates.push({ id, name: 'Novo treino', weekday: 0, items: [], ...defaultRoutine('') });
     saveCfg();
     go('#definicoes/treino/' + id);
   },
@@ -252,6 +290,54 @@ export const actions = {
     render();
   },
   'd-tpl-rm'(d) { readTpl(); tplDraft.items.splice(+d.i, 1); render(); },
+  'd-tpl-mob-add'(d) {
+    readTpl();
+    const id = val(form('tpl'), 'mob_' + d.k);
+    if (!id || !S.cfg.mobility[id]) return;
+    (tplDraft[d.k] ||= []).push(id);
+    render();
+  },
+  'd-tpl-mob-rm'(d) { readTpl(); tplDraft[d.k].splice(+d.i, 1); render(); },
+  'd-tpl-mob-mv'(d) {
+    readTpl();
+    const a = tplDraft[d.k], i = +d.i, j = i + +d.d;
+    if (j < 0 || j >= a.length) return;
+    [a[i], a[j]] = [a[j], a[i]];
+    render();
+  },
+  'd-mob'(d) {
+    const m = d.id ? S.cfg.mobility[d.id] : null;
+    const e = m || { name: '', kind: d.kind || 'stretch', unit: 's', val: 30, side: false, cue: '' };
+    const body = openSheet(`<div class="sheet-title">${m ? 'Editar movimento' : 'Novo movimento'}</div>
+      ${field('Nome', textInput('name', e.name, m ? '' : 'autofocus placeholder="Alongamento de peitoral"'))}
+      <div class="grid2">${field('Quando', selectInput('kind', [['warm', 'Aquecimento'], ['stretch', 'Alongamento']], e.kind))}${field('Medida', selectInput('unit', [['s', 'Segundos'], ['reps', 'Repetições']], e.unit))}</div>
+      ${field('Valor', numInput('val', e.val, 'inputmode="numeric"'), 'Segundos a manter, ou repetições. 300 s = 5 min.')}
+      ${toggle('side', e.side, 'Faz-se de cada lado')}
+      ${field('Indicação', textInput('cue', e.cue, 'placeholder="Como fazer, em poucas palavras"'))}
+      <div class="${m ? 'grid2' : ''} mt">${m ? `<button class="btn btn-danger" data-x="del">${icon('trash')} Apagar</button>` : ''}<button class="btn btn-gold ${m ? '' : 'btn-block'}" data-x="ok">Guardar</button></div>`);
+    body.querySelector('[data-x=ok]').onclick = async () => {
+      const name = val(body, 'name').trim();
+      const v = parseInt(val(body, 'val'), 10);
+      if (!name) return toast('Indicar o nome');
+      if (!(v > 0 && v <= 1800)) return toast('Valor entre 1 e 1800');
+      const id = m?.id || 'm_' + uid();
+      S.cfg.mobility[id] = { id, name, kind: val(body, 'kind'), unit: val(body, 'unit'), val: v, side: body.querySelector('[name=side]').checked, cue: val(body, 'cue').trim() };
+      await saveCfg();
+      closeSheet();
+      toast('Guardado');
+      render();
+    };
+    body.querySelector('[data-x=del]')?.addEventListener('click', async () => {
+      const inTpl = S.cfg.templates.filter((t) => [...(t.warmup || []), ...(t.cooldown || [])].includes(m.id));
+      if (!(await confirmDialog(`Apagar ${m.name}?`, { ok: 'Apagar', danger: true, detail: inTpl.length ? `Sai também de: ${inTpl.map((t) => t.name).join(', ')}.` : '' }))) return;
+      for (const t of S.cfg.templates) { t.warmup = (t.warmup || []).filter((x) => x !== m.id); t.cooldown = (t.cooldown || []).filter((x) => x !== m.id); }
+      delete S.cfg.mobility[m.id];
+      await saveCfg();
+      closeSheet();
+      render();
+    });
+  },
+
   'd-tpl-add'() {
     readTpl();
     const first = Object.keys(S.cfg.exercises)[0];

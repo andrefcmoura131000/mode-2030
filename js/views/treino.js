@@ -1,11 +1,18 @@
 // Separador Treino: semana, pré-visualização, histórico de sessões e histórico por exercício.
 import { S, removeSession } from '../store.js';
-import { phase, templateFor, sessionStats, exerciseHistory, workSets, targetSets } from '../logic.js';
+import { phase, templateFor, sessionStats, exerciseHistory, workSets, targetSets, routineMinutes } from '../logic.js';
 import { dateKey, mondayOf, addDays, DIAS_CURTOS, shortDate, longDate, esc, fmt, fmtKg, mmss, weekday } from '../util.js';
 import { icon, exThumb, exPhoto, openSheet, closeSheet, lineChart, confirmDialog, render as rerender } from '../ui.js';
-import { startSession } from './sessao.js';
+import { startSession, routineSummary } from './sessao.js';
 
 const exName = (id) => S.cfg.exercises[id]?.name || '(exercício apagado)';
+const movesOf = (ids) => (ids || []).map((id) => S.cfg.mobility?.[id]).filter(Boolean);
+/** Linha "Aquecimento · 6 movimentos · ~9 min" na pré-visualização do treino. */
+function routineRow(ids, label) {
+  const m = movesOf(ids);
+  if (!m.length) return '';
+  return `<div class="list-row"><span class="thumb thumb-empty">${icon(label === 'Aquecimento' ? 'flame' : 'stretch')}</span><span class="list-main">${label}<span class="mut small block">${m.map((x) => esc(x.name.split(' (')[0])).join(' · ')}</span></span><span class="mut small tnum">~${routineMinutes(m)} min</span></div>`;
+}
 
 function setText(ex, s) {
   if (!ex) return `${fmtKg(s.kg)} × ${s.reps}`;
@@ -87,7 +94,7 @@ function sessionSheet(id) {
   const s = S.sessions.find((x) => x.id === id);
   if (!s) return;
   const st = sessionStats(s);
-  const body = openSheet(`<div class="sheet-title">${esc(s.name)}</div><div class="mut">${longDate(s.date)} · semana ${s.week}${s.readapt ? ' · readaptação' : ''}</div>
+  const body = openSheet(`<div class="sheet-title">${esc(s.name)}</div><div class="mut">${longDate(s.date)} · semana ${s.week}${s.readapt ? ' · readaptação' : ''}</div>${routineSummary(s) ? `<div class="mut small">${routineSummary(s)}</div>` : ''}
     <div class="grid3 stats mt-s">
       <div><div class="stat-v tnum">${mmss(st.duration)}</div><div class="mut small">duração</div></div>
       <div><div class="stat-v tnum">${st.sets}</div><div class="mut small">séries</div></div>
@@ -121,12 +128,12 @@ export const actions = {
     const date = dateKey();
     const isToday = templateFor(S.cfg, date)?.id === tpl.id;
     const body = openSheet(`<div class="sheet-title">${esc(tpl.name)}</div>
-      <div class="list">${tpl.items.map((i) => {
+      <div class="list">${routineRow(tpl.warmup, 'Aquecimento')}${tpl.items.map((i) => {
         const ex = S.cfg.exercises[i.exerciseId];
         if (!ex) return '';
         const sets = targetSets(S.cfg, i.sets, date);
         return `<div class="list-row">${exThumb(ex)}<span class="list-main">${esc(ex.name)}</span><span class="mut small tnum">${sets} × ${i.repMin}${i.repMax !== i.repMin ? '–' + i.repMax : ''}${ex.mode === 'time' ? ' s' : ''}</span></div>`;
-      }).join('')}</div>
+      }).join('')}${routineRow(tpl.cooldown, 'Alongamentos')}</div>
       ${S.active ? `<p class="mut small mt">Já há um treino em curso (${esc(S.active.name)}).</p><a class="btn btn-gold btn-block mt-s" href="#sessao" data-x="go">Voltar ao treino</a>`
                  : `<button class="btn btn-gold btn-xl btn-block mt" data-x="start">${icon('play')} Começar ${isToday ? '' : 'hoje '}${esc(tpl.name)}</button>`}`);
     body.querySelector('[data-x=start]')?.addEventListener('click', () => { closeSheet(); startSession(tpl.id); });
