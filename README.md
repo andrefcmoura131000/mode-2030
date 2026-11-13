@@ -5,7 +5,16 @@ Funciona sem rede, instala-se no ecrã principal e guarda tudo **só no telemóv
 
 - Sem servidor e sem dependências: HTML, CSS e JavaScript simples.
 - Dados em IndexedDB. Backup manual em JSON (Definições → Backup), com lembrete semanal no ecrã Hoje.
-- Fotos dos exercícios: [free-exercise-db](https://github.com/yuhonas/free-exercise-db), domínio público (Unlicense).
+- Fotos dos exercícios, do aquecimento e dos alongamentos: [free-exercise-db](https://github.com/yuhonas/free-exercise-db), domínio público (Unlicense).
+- Única ligação externa (opcional): ao ler um código de barras, só o código é enviado ao [Open Food Facts](https://world.openfoodfacts.org) para obter os valores do produto. Os registos nunca saem do telemóvel.
+
+**Treino.** Aquecimento e alongamentos escolhidos pelos músculos de hoje e de ontem (`js/mobility-db.js`, com as fontes).
+Treinos pelo dia da semana ou em sequência (Definições → Plano e descanso), aviso dos treinos que ficaram por fazer,
+trocar um exercício a meio do treino por outro dos mesmos músculos, calculadora de discos nos exercícios com barra
+e sessão de flexibilidade (~15 min) para os dias de descanso. Em Progresso: séries por músculo por semana (meta 10–20).
+
+**Alimentação.** Base de ~180 alimentos com valores médios, porções, recentes, entrada rápida, código de barras
+e sugestões para a proteína que falta no dia.
 
 ---
 

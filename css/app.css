@@ -414,3 +414,19 @@ input[type="date"].input { color-scheme: dark; }
 .guide .rest-ring { width: 140px; height: 140px; margin: 6px auto 10px; }
 .mob-list .thumb { margin-top: 1px; }
 .focus-m { line-height: 1.4; }
+
+/* v4: trocar exercício, discos, código de barras, séries por músculo, treinos em falta */
+.ex-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ex-head .ex-name { flex: 1; min-width: 0; }
+.ex-head .btn { flex: none; margin-top: 4px; }
+.plates-b { margin: 6px 0 2px; }
+.plates-v { font-size: 26px; color: var(--gold); margin: 4px 0; }
+.scan { position: relative; border-radius: 14px; overflow: hidden; background: #000; aspect-ratio: 4 / 3; margin-top: 8px; }
+.scan video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-line { position: absolute; left: 12%; right: 12%; top: 50%; height: 2px; background: var(--gold); box-shadow: 0 0 12px var(--gold); opacity: .8; }
+.ms-row { margin-top: 10px; }
+.bar.bar-lo i { background: var(--mut); }
+.bar.bar-hi i { background: #e6d4a8; }
+.missed .chips { margin-top: 6px; }
+details > summary { cursor: pointer; list-style: none; padding: 6px 0; }
+details > summary::-webkit-details-marker { display: none; }

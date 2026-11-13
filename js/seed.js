@@ -115,6 +115,8 @@ export function seedConfig() {
     rest: { compound: 150, isolation: 75 },
     readapt: { weeks: 2, sets: 2, suggest: false },
     sound: true,
+    schedule: 'weekday', // 'weekday': treino pelo dia da semana · 'sequence': o próximo da ordem, seja qual for o dia
+    bar: 20, // kg da barra olímpica (calculadora de discos)
     exercises,
     templates: TEMPLATES.map((t) => ({ ...JSON.parse(JSON.stringify(t)), ...NEW_ROUTINE() })),
     mobility,

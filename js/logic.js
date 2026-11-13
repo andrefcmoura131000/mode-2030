@@ -17,7 +17,39 @@ export function phase(cfg, date) {
   return { week, readapt, rir: readapt ? '3–4' : '1–2', label: readapt ? 'Readaptação' : 'Fase normal' };
 }
 
-export const templateFor = (cfg, date) => cfg.templates.find((t) => t.weekday === weekday(date)) || null;
+/** Treinos pela ordem do plano (os de dia fixo primeiro, de segunda a domingo). */
+export const tplOrder = (cfg) => cfg.templates.map((t, i) => [t, i]).sort((a, b) => (a[0].weekday || 9) - (b[0].weekday || 9) || a[1] - b[1]).map(([t]) => t);
+
+const isWorkout = (s) => s.endedAt && s.kind !== 'flex';
+
+/**
+ * Modo sequência: o treino a seguir ao último feito, seja qual for o dia da semana.
+ * Se o treino de hoje já foi feito, devolve esse (para o ecrã mostrar "concluído").
+ * sessions: mais recente primeiro.
+ */
+export function nextInSequence(cfg, sessions, date) {
+  const order = tplOrder(cfg);
+  if (!order.length) return null;
+  const last = (sessions || []).find((s) => isWorkout(s) && s.date <= date && order.some((t) => t.id === s.templateId));
+  if (!last) return order[0];
+  const i = order.findIndex((t) => t.id === last.templateId);
+  return last.date === date ? order[i] : order[(i + 1) % order.length];
+}
+
+/** Treino do dia: pelo dia da semana (por defeito) ou o próximo da sequência (cfg.schedule = 'sequence'). */
+export function templateFor(cfg, date, sessions = []) {
+  if (cfg.schedule === 'sequence') return nextInSequence(cfg, sessions, date);
+  return cfg.templates.find((t) => t.weekday === weekday(date)) || null;
+}
+
+/** Modo por dia da semana: treinos de dias anteriores desta semana que ficaram por fazer. */
+export function missedThisWeek(cfg, sessions, date) {
+  if (cfg.schedule === 'sequence') return [];
+  const mon = mondayOf(date);
+  const wd = weekday(date);
+  const done = new Set((sessions || []).filter((s) => isWorkout(s) && s.date >= mon && s.date <= date).map((s) => s.templateId));
+  return tplOrder(cfg).filter((t) => t.weekday >= 1 && t.weekday < wd && !done.has(t.id));
+}
 
 export function targetSets(cfg, sets, date) {
   return phase(cfg, date).readapt ? Math.min(sets, cfg.readapt.sets) : sets;
@@ -273,6 +305,84 @@ export function routinesFor(cfg, tpl, date, sessions) {
   return buildRoutines(cfg, items, yesterdayItems(sessions, date));
 }
 
+/**
+ * Sessão de flexibilidade para um dia de descanso: 1 alongamento de 60 s por músculo, pelos músculos
+ * mais trabalhados nos últimos 7 dias (ou um conjunto base, sem treinos). Até ~15 min.
+ * Serve para chegar aos ~10 min por semana por músculo (Ingram 2024), que os fins de treino não atingem.
+ */
+export function flexRoutine(cfg, sessions, date) {
+  const from = addDays(date, -7);
+  const items = (sessions || []).filter((s) => isWorkout(s) && s.date >= from && s.date < date)
+    .flatMap((s) => s.items.map((i) => ({ exerciseId: i.exerciseId, sets: workSets(i.log).length })));
+  const load = muscleLoad(cfg, items);
+  const BASE = ['hamstrings', 'hip_flexors', 'chest', 'quads', 'glutes', 'lats', 'calves', 'upper_back'];
+  BASE.forEach((m, i) => { load[m] = (load[m] || 0) + 0.1 * (BASE.length - i); }); // desempate e base sem treinos
+  const moves = Object.values(cfg.mobility || {}).filter((m) => m.muscles?.length);
+  const warm = ['cat_cow', 'worlds_greatest'].filter((id) => cfg.mobility?.[id]).map((id) => ({ id, val: cfg.mobility[id].val, why: 'hoje' }));
+  let pool = moves.filter((m) => m.kind === 'stretch');
+  const cooldown = [];
+  const done = new Set();
+  for (const k of Object.keys(load).sort((a, b) => load[b] - load[a])) {
+    if (done.has(k)) continue;
+    const own = pool.filter((m) => m.muscles[0] === k);
+    const m = (own.length ? own : pool.filter((x) => x.muscles.includes(k)))[0];
+    if (!m) continue;
+    const next = [...cooldown, { id: m.id, val: 60, why: 'hoje' }];
+    if (routineMinutes(resolveMoves(cfg, next)) > 15) break;
+    cooldown.push({ id: m.id, val: 60, why: 'hoje' });
+    m.muscles.slice(0, 1).forEach((x) => done.add(x));
+    pool = pool.filter((x) => x !== m);
+  }
+  return { warmup: warm, cooldown, today: load, yesterday: {} };
+}
+
+/* ---------- Trocar exercício ---------- */
+
+/** Exercícios parecidos (mesmos músculos), do mais para o menos parecido. Semelhança de cosseno entre os pesos. */
+export function similarExercises(cfg, exId, exclude = [], limit = 8) {
+  const a = cfg.exercises[exId]?.muscles || {};
+  const na = Math.hypot(...Object.values(a));
+  if (!na) return [];
+  const skip = new Set([exId, ...exclude]);
+  return Object.values(cfg.exercises)
+    .filter((e) => !skip.has(e.id))
+    .map((e) => {
+      const b = e.muscles || {};
+      const nb = Math.hypot(...Object.values(b));
+      const dot = Object.keys(a).reduce((s, k) => s + a[k] * (b[k] || 0), 0);
+      return { ex: e, sim: nb ? dot / (na * nb) : 0 };
+    })
+    .filter((x) => x.sim >= 0.5)
+    .sort((x, y) => y.sim - x.sim)
+    .slice(0, limit);
+}
+
+/* ---------- Séries por músculo ---------- */
+
+/**
+ * Séries por músculo numa semana: conta 1 série para os músculos com peso 1 no exercício
+ * e a fração correspondente para os secundários (ex.: tríceps no supino = 0,5).
+ */
+export function weeklyMuscleSets(cfg, sessions, monday) {
+  const end = addDays(monday, 6);
+  const items = (sessions || []).filter((s) => isWorkout(s) && s.date >= monday && s.date <= end)
+    .flatMap((s) => s.items.map((i) => ({ exerciseId: i.exerciseId, sets: workSets(i.log).length })));
+  return muscleLoad(cfg, items);
+}
+
+/* ---------- Discos ---------- */
+
+/** Discos de cada lado para chegar a total kg com uma barra de bar kg. Devolve { side: [kg…], rest } (rest = kg que faltam). */
+export function platesFor(total, bar = 20, plates = [25, 20, 15, 10, 5, 2.5, 1.25]) {
+  let per = round((total - bar) / 2);
+  if (!(per > 0)) return { side: [], rest: per < 0 ? round(per * 2) : 0 };
+  const side = [];
+  for (const p of [...plates].sort((a, b) => b - a)) {
+    while (per + 1e-9 >= p) { side.push(p); per = round(per - p); }
+  }
+  return { side, rest: round(per * 2) };
+}
+
 /** Músculos principais por ordem de carga (para mostrar "Hoje: peito, ombros…"). */
 export const topMuscles = (load, min = MAIN) => Object.keys(load).filter((m) => load[m] >= min).sort((a, b) => load[b] - load[a]);
 
@@ -299,6 +409,56 @@ export function recentFoods(days, foods, limit = 15) {
   return [...out.values()];
 }
 
+/**
+ * Ideias para fechar a proteína que falta: alimentos com pelo menos 55% das calorias em proteína,
+ * os usados recentemente primeiro. Devolve [{ foodId, qty, label, p }], 1–3 porções cada.
+ */
+export function proteinIdeas(foods, recent, gap, limit = 3) {
+  if (!(gap >= 15)) return [];
+  const rich = (f) => f && f.kcal > 0 && (f.p * 4) / f.kcal >= 0.55;
+  const ids = [...new Set([...(recent || []).map((r) => r.foodId), ...Object.values(foods).sort((a, b) => b.p / b.kcal - a.p / a.kcal).map((f) => f.id)])];
+  const out = [];
+  const seen = new Set();
+  for (const id of ids) {
+    const f = foods[id];
+    if (!rich(f)) continue;
+    const key = normText(f.name).split(/[\s(/]/)[0]; // não repetir "Atum", "Atum em azeite"…
+    if (seen.has(key)) continue;
+    const unit = f.basis === 'un' ? { label: 'un', qty: 1 } : f.portions?.[0] || { label: `100 ${f.basis}`, qty: 100 };
+    const p1 = macrosFor(f, unit.qty).p;
+    if (!(p1 > 0)) continue;
+    const n = Math.min(3, Math.max(1, Math.round(gap / p1)));
+    out.push({ foodId: f.id, qty: unit.qty * n, label: f.basis === 'un' ? `${n} un` : `${n > 1 ? n + ' × ' : ''}${unit.label}`, p: p1 * n });
+    seen.add(key);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Produto do Open Food Facts → alimento da app (valores por 100 g/ml). Devolve null sem calorias nem macros.
+ * product: resposta de /api/v2/product/<código>.json → .product
+ */
+export function offToFood(code, product) {
+  if (!product) return null;
+  const n = product.nutriments || {};
+  const g = (k) => { const v = parseFloat(n[k + '_100g']); return Number.isFinite(v) && v >= 0 ? round(v, 1) : null; };
+  const p = g('proteins'), c = g('carbohydrates'), f = g('fat');
+  let kcal = g('energy-kcal');
+  if (kcal == null && g('energy') != null) kcal = Math.round(g('energy') / 4.184); // kJ → kcal
+  if (kcal == null && p != null && c != null && f != null) kcal = Math.round(p * 4 + c * 4 + f * 9);
+  if (kcal == null) return null;
+  const qty = String(product.quantity || '');
+  const basis = /\d\s*(ml|cl|l)\b/i.test(qty) && !/\d\s*k?g\b/i.test(qty) ? 'ml' : 'g';
+  const name = [product.product_name_pt || product.product_name || product.generic_name || 'Produto ' + code, product.brands?.split(',')[0]?.trim()].filter(Boolean).join(' · ');
+  const serving = parseFloat(product.serving_quantity);
+  return {
+    id: 'bc_' + code, name: name.slice(0, 80), basis, kcal: Math.round(kcal), p: p ?? 0, c: c ?? 0, f: f ?? 0,
+    cat: 'outros', barcode: code, custom: true,
+    ...(serving > 0 && serving < 2000 ? { portions: [{ label: '1 dose', qty: round(serving) }] } : {}),
+  };
+}
+
 export function macrosFor(food, qty) {
   const k = food.basis === 'un' ? qty : qty / 100;
   return { kcal: food.kcal * k, p: food.p * k, c: food.c * k, f: food.f * k };
@@ -313,7 +473,8 @@ export function unitLabel(food) {
 }
 
 export function isTrainingDay(cfg, date, sessions) {
-  return !!templateFor(cfg, date) || sessions.some((s) => s.date === date && s.endedAt);
+  const trained = sessions.some((s) => s.date === date && isWorkout(s));
+  return trained || (cfg.schedule !== 'sequence' && !!templateFor(cfg, date));
 }
 export const waterGoal = (cfg, date, sessions) => (isTrainingDay(cfg, date, sessions) ? cfg.water.training : cfg.water.rest);
 export const waterTotal = (day) => (day?.water || []).reduce((a, w) => a + w.ml, 0);
@@ -356,7 +517,7 @@ export function weightSuggestion(weeks) {
 export function weekSummary(state, monday) {
   const dates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   const inWeek = new Set(dates);
-  const sessions = state.sessions.filter((s) => s.endedAt && inWeek.has(s.date));
+  const sessions = state.sessions.filter((s) => isWorkout(s) && inWeek.has(s.date));
   const planned = state.cfg.templates.length;
   const foodDays = dates.map((d) => state.days[d]).filter((d) => d && d.food && d.food.length);
   const tot = foodDays.map(dayTotals);

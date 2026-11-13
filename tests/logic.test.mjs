@@ -286,3 +286,108 @@ test('pesquisa sem acentos e alimentos recentes', () => {
   };
   assert.deepEqual(recentFoods(days, foods), [{ foodId: 'a', qty: 150 }, { foodId: 'b', qty: 2 }]);
 });
+
+/* ---------- v4 ---------- */
+import { nextInSequence, missedThisWeek, isTrainingDay, similarExercises, weeklyMuscleSets, platesFor, proteinIdeas, offToFood, flexRoutine, routineMinutes as rMin, resolveMoves as rMoves } from '../js/logic.js';
+
+const sess = (id, date, templateId, extra = {}) => ({ id, date, templateId, startedAt: Date.parse(date), endedAt: Date.parse(date) + 3600e3, items: [], ...extra });
+const byRecent = (l) => l.sort((a, b) => b.startedAt - a.startedAt);
+
+test('modo sequência: propõe o seguinte ao último feito, seja qual for o dia', () => {
+  const c = { ...cfg(), schedule: 'sequence' };
+  assert.equal(templateFor(c, '2026-11-11', []).id, 'pushA'); // sem histórico: o primeiro
+  const s = byRecent([sess('a', '2026-11-09', 'pushA')]);
+  assert.equal(templateFor(c, '2026-11-11', s).id, 'pullA'); // faltou terça: quarta continua no Pull A
+  assert.equal(templateFor(c, '2026-11-09', s).id, 'pushA'); // no próprio dia mostra o feito
+  const s2 = byRecent([sess('b', '2026-11-14', 'legsB'), ...s]);
+  assert.equal(nextInSequence(c, s2, '2026-11-15').id, 'pushA'); // volta ao início
+  // flexibilidade não conta como treino
+  const s3 = byRecent([sess('f', '2026-11-10', null, { kind: 'flex' }), ...s]);
+  assert.equal(templateFor(c, '2026-11-11', s3).id, 'pullA');
+  // água: em sequência, dia de treino só se houve treino
+  assert.equal(isTrainingDay(c, '2026-11-11', s), false);
+  assert.equal(isTrainingDay(c, '2026-11-09', s), true);
+  assert.equal(isTrainingDay(cfg(), '2026-11-15', s3), false);
+});
+
+test('modo por dia da semana: treinos que ficaram por fazer esta semana', () => {
+  const c = cfg();
+  const s = byRecent([sess('a', '2026-11-09', 'pushA'), sess('c', '2026-11-11', 'legsA')]);
+  assert.deepEqual(missedThisWeek(c, s, '2026-11-12').map((t) => t.id), ['pullA']);
+  assert.deepEqual(missedThisWeek(c, s, '2026-11-09').map((t) => t.id), []);
+  assert.deepEqual(missedThisWeek(c, [], '2026-11-15').map((t) => t.id), ['pushA', 'pullA', 'legsA', 'pushB', 'pullB', 'legsB']);
+  assert.deepEqual(missedThisWeek({ ...c, schedule: 'sequence' }, [], '2026-11-15'), []);
+});
+
+test('trocar exercício: alternativas para os mesmos músculos', () => {
+  const c = cfg();
+  const alt = similarExercises(c, 'bench_bb', []).map((x) => x.ex.id);
+  assert.ok(alt.slice(0, 3).some((id) => ['incline_bb', 'incline_db', 'chest_dip'].includes(id)), alt.join());
+  assert.ok(!alt.includes('squat_bb'));
+  const leg = similarExercises(c, 'leg_press', ['squat_bb']).map((x) => x.ex.id);
+  assert.ok(!leg.includes('squat_bb') && leg.includes('bulgarian_db'), leg.join());
+  const curl = similarExercises(c, 'curl_db', []).map((x) => x.ex.id);
+  assert.ok(curl.includes('preacher_curl') && curl.includes('hammer_curl_db'));
+});
+
+test('séries por músculo na semana (secundários contam a fração)', () => {
+  const c = cfg();
+  const log = (n) => Array.from({ length: n }, () => ({ kg: 50, reps: 8 }));
+  const s = [
+    sess('a', '2026-11-09', 'pushA', { items: [{ exerciseId: 'bench_bb', log: [...log(3), { kg: 20, reps: 10, w: true }] }, { exerciseId: 'pushdown', log: log(3) }] }),
+    sess('b', '2026-11-16', 'pushA', { items: [{ exerciseId: 'bench_bb', log: log(3) }] }), // semana seguinte
+    sess('f', '2026-11-10', null, { kind: 'flex' }),
+  ];
+  const m = weeklyMuscleSets(c, s, '2026-11-09');
+  assert.equal(m.chest, 3);
+  assert.equal(m.triceps, 4.5); // 3 diretas + 3 × 0,5 no supino
+  assert.equal(m.shoulders, 1.5);
+});
+
+test('calculadora de discos', () => {
+  assert.deepEqual(platesFor(100, 20), { side: [25, 15], rest: 0 });
+  assert.deepEqual(platesFor(62.5, 20), { side: [20, 1.25], rest: 0 });
+  assert.deepEqual(platesFor(20, 20), { side: [], rest: 0 });
+  assert.deepEqual(platesFor(15, 20).side, []);
+  assert.ok(platesFor(15, 20).rest < 0);
+  assert.deepEqual(platesFor(61, 20), { side: [20], rest: 1 }); // sobra 0,5 por lado
+  assert.deepEqual(platesFor(140, 20), { side: [25, 25, 10], rest: 0 });
+});
+
+test('ideias para a proteína em falta', () => {
+  const c = cfg();
+  assert.deepEqual(proteinIdeas(c.foods, [], 10), []);
+  const ideas = proteinIdeas(c.foods, [{ foodId: 'atum', qty: 80 }, { foodId: 'pao', qty: 1 }], 45);
+  assert.equal(ideas.length, 3);
+  assert.equal(ideas[0].foodId, 'atum'); // recente e rico em proteína primeiro
+  assert.ok(!ideas.some((i) => i.foodId === 'pao'));
+  for (const i of ideas) { const f = c.foods[i.foodId]; assert.ok((f.p * 4) / f.kcal >= 0.55); assert.ok(i.p > 10 && i.p < 90, i.foodId + ' ' + i.p); }
+  assert.equal(new Set(ideas.map((i) => i.foodId.split('_')[0])).size, 3); // sem repetir o mesmo alimento
+});
+
+test('código de barras: produto do Open Food Facts → alimento', () => {
+  const f = offToFood('5601234567890', { product_name: 'Skyr natural', brands: 'Marca X, Outra', quantity: '450 g', serving_quantity: '150',
+    nutriments: { 'energy-kcal_100g': 63, proteins_100g: 11, carbohydrates_100g: 4, fat_100g: 0.2 } });
+  assert.deepEqual([f.id, f.name, f.basis, f.kcal, f.p, f.c, f.f, f.barcode], ['bc_5601234567890', 'Skyr natural · Marca X', 'g', 63, 11, 4, 0.2, '5601234567890']);
+  assert.deepEqual(f.portions, [{ label: '1 dose', qty: 150 }]);
+  const drink = offToFood('123', { product_name_pt: 'Bebida', quantity: '1 L', nutriments: { energy_100g: 180, proteins_100g: 3.3, carbohydrates_100g: 4.8, fat_100g: 1.6 } });
+  assert.equal(drink.basis, 'ml');
+  assert.equal(drink.kcal, 43); // 180 kJ
+  assert.equal(offToFood('1', { product_name: 'Sem valores', nutriments: {} }), null);
+  assert.equal(offToFood('1', null), null);
+});
+
+test('sessão de flexibilidade: músculos da semana, 60 s, até ~15 min', () => {
+  const c = cfg();
+  const base = flexRoutine(c, [], '2026-11-15');
+  assert.ok(base.cooldown.length >= 6, 'sem treinos usa o conjunto base');
+  const log = [{ kg: 50, reps: 8 }, { kg: 50, reps: 8 }, { kg: 50, reps: 8 }];
+  const s = byRecent([sess('a', '2026-11-13', 'pullB', { items: c.templates.find((t) => t.id === 'pullB').items.map((i) => ({ exerciseId: i.exerciseId, log })) })]);
+  const R = flexRoutine(c, s, '2026-11-15');
+  const ms = R.cooldown.map((x) => c.mobility[x.id].muscles[0]);
+  assert.ok(ms.includes('lats') && ms.includes('biceps'), ms.join());
+  assert.ok(R.cooldown.every((x) => x.val === 60));
+  assert.equal(new Set(R.cooldown.map((x) => x.id)).size, R.cooldown.length);
+  const min = rMin(rMoves(c, [...R.warmup, ...R.cooldown]));
+  assert.ok(min >= 8 && min <= 17, 'minutos: ' + min);
+});

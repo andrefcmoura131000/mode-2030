@@ -1,8 +1,29 @@
 // Separador Progresso: peso, médias semanais, sugestão de ajuste calórico e resumos semanais.
 import { S, day, saveDay } from '../store.js';
-import { weeklyWeights, weightSuggestion, weekSummary } from '../logic.js';
+import { weeklyWeights, weightSuggestion, weekSummary, weeklyMuscleSets } from '../logic.js';
+import { MUSCLES } from '../mobility-db.js';
 import { dateKey, addDays, mondayOf, shortDate, longDate, fmt, num, esc } from '../util.js';
-import { icon, lineChart, tsOf, openSheet, closeSheet, field, numInput, toast, vibrate, render } from '../ui.js';
+import { icon, bar, lineChart, tsOf, openSheet, closeSheet, field, numInput, toast, vibrate, render } from '../ui.js';
+
+/**
+ * Séries por músculo nesta semana e na anterior. Referência para hipertrofia: ~10–20 séries por músculo
+ * por semana (Schoenfeld et al. 2017; Pelland et al. 2024). Abaixo de 10 cresce menos; acima de 20 o ganho extra é pequeno.
+ */
+function muscleCard(today) {
+  const mon = mondayOf(today);
+  const cur = weeklyMuscleSets(S.cfg, S.sessions, mon);
+  const prev = weeklyMuscleSets(S.cfg, S.sessions, addDays(mon, -7));
+  const rows = MUSCLES.filter(([k]) => (cur[k] || 0) >= 0.5 || (prev[k] || 0) >= 0.5)
+    .sort((a, b) => (cur[b[0]] || 0) - (cur[a[0]] || 0) || (prev[b[0]] || 0) - (prev[a[0]] || 0))
+    .map(([k, label]) => {
+      const n = cur[k] || 0, pv = prev[k] || 0;
+      const cls = n >= 10 && n <= 20 ? '' : n > 20 ? 'bar-hi' : 'bar-lo';
+      return `<div class="ms-row"><div class="row-sb small"><span>${esc(label)}</span><span class="tnum">${fmt(n, 1)}<span class="mut"> · antes ${fmt(pv, 1)}</span></span></div>${bar(n, 20, cls)}</div>`;
+    }).join('');
+  return `<section class="card"><div class="row-sb"><span class="lbl">Séries por músculo · esta semana</span></div>
+    ${rows || '<p class="mut">Os treinos desta semana aparecem aqui.</p>'}
+    <p class="mut small mt-s">Meta para crescer: 10–20 séries por músculo por semana (barra cheia = 20). Os músculos secundários contam meia série (ex.: tríceps no supino).</p></section>`;
+}
 
 function weights() {
   return Object.entries(S.days).filter(([, d]) => d && d.weight).map(([k, d]) => ({ date: k, kg: d.weight })).sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -51,6 +72,7 @@ export function render_() {
       ${sug.kind === 'up' || sug.kind === 'down' ? `<p class="mut small">É só uma sugestão: as metas não mudam sozinhas.</p><a class="btn btn-block mt-s" href="#definicoes/metas">Rever metas</a>` : ''}
     </section>
     ${wkRows ? `<section class="card"><div class="lbl">Médias semanais</div>${wkRows}</section>` : ''}
+    ${muscleCard(today)}
     <section class="card"><div class="lbl">Resumos semanais</div>${sumRows}</section>
     ${ws.length ? `<section class="card"><div class="lbl">Registos</div><div class="list">${[...ws].reverse().slice(0, 20).map((w) =>
       `<button class="list-row" data-act="w-add" data-date="${w.date}"><span class="list-main">${longDate(w.date)}</span><span class="tnum">${fmt(w.kg, 1)} kg</span></button>`).join('')}</div></section>` : ''}`;

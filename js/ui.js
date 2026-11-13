@@ -21,6 +21,8 @@ export function goThen(hash, fn) {
 const P = {
   home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   barbell: '<path d="M2 12h2M20 12h2M5 8v8M19 8v8M8 6v12M16 6v12M8 12h8"/>',
+  swap: '<path d="M7 4 3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7"/>',
+  scan: '<path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M7 8v8M10 8v8M13 8v8M17 8v8"/>',
   food: '<path d="M3 11h18a9 9 0 0 1-18 0Z"/><path d="M12 7c0-2 1-3 3-4M8 7c0-1.5.5-2.5 2-3"/>',
   chart: '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-7"/>',
   settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',

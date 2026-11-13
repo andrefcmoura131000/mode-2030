@@ -1,6 +1,6 @@
 // Modo treino: aquecimento, um exercício de cada vez (registo da série, descanso automático), alongamentos no fim.
-import { S, saveActive, saveSession, sortSessions } from '../store.js';
-import { phase, targetSets, lastPerformance, progression, prefill, workSets, bestKg, sessionStats, doseText, routineMinutes, guideStart, guideAdvance, guidePause, guideResume, routinesFor, topMuscles } from '../logic.js';
+import { S, saveActive, saveSession, sortSessions, saveCfg } from '../store.js';
+import { phase, targetSets, lastPerformance, progression, prefill, workSets, bestKg, sessionStats, doseText, routineMinutes, guideStart, guideAdvance, guidePause, guideResume, routinesFor, topMuscles, flexRoutine, similarExercises, platesFor } from '../logic.js';
 import { MUSCLES } from '../mobility-db.js';
 import { esc, fmt, fmtKg, num, mmss, uid, dateKey, round } from '../util.js';
 import { icon, exPhoto, exThumb, go, goThen, render, toast, vibrate, beep, unlockAudio, keepAwake, confirmDialog, openSheet, closeSheet, numInput, field } from '../ui.js';
@@ -39,6 +39,28 @@ export function startSession(templateId) {
   go('#sessao');
 }
 
+/** Sessão de flexibilidade (dia de descanso): só mobilidade e alongamentos, sem exercícios. */
+export function startFlex() {
+  if (S.active) { go('#sessao'); return; }
+  const date = dateKey();
+  const ph = phase(S.cfg, date);
+  const R = flexRoutine(S.cfg, S.sessions, date);
+  if (!R.cooldown.length) { toast('Não há alongamentos na biblioteca'); return; }
+  const routine = (list) => ({ ids: list.map((x) => x.id), done: {}, vals: Object.fromEntries(list.map((x) => [x.id, x.val])), why: {} });
+  S.active = {
+    id: uid(), kind: 'flex', date, templateId: null, name: 'Flexibilidade', week: ph.week, readapt: false,
+    startedAt: Date.now(), endedAt: null, cur: 0, restEnd: null, restTotal: 0, extra: false,
+    items: [], warm: routine(R.warmup), cool: routine(R.cooldown),
+    focus: { today: topMuscles(R.today, 1).slice(0, 6), yesterday: [] }, guide: null,
+  };
+  S.active.stage = S.active.warm.ids.length ? 'warm' : 'cool';
+  S.active.draft = { kg: '', reps: '', w: false };
+  saveActive();
+  unlockAudio();
+  keepAwake(true);
+  go('#sessao');
+}
+
 /* ---------- Auxiliares ---------- */
 const curItem = () => S.active.items[S.active.cur];
 const exOf = (it) => S.cfg.exercises[it.exerciseId] || { id: it.exerciseId, name: '(exercício apagado)', kind: 'isolation', mode: 'load', inc: 2.5 };
@@ -56,6 +78,13 @@ function makeDraft() {
   const p = prefill(it, lastOf(it), suggOf(it), k);
   return { kg: p.kg, reps: p.reps, w: false };
 }
+const isBarbell = (ex) => ex.mode === 'load' && (/barbell/i.test(ex.img || '') || /\(barbell\)/i.test(ex.name || ''));
+/** "2 × 20 + 5 + 1,25" */
+const platesText = (side) => {
+  const g = [];
+  for (const p of side) { const last = g[g.length - 1]; if (last && last[0] === p) last[1]++; else g.push([p, 1]); }
+  return g.map(([p, n]) => (n > 1 ? n + ' × ' + fmtKg(p) : fmtKg(p))).join(' + ');
+};
 const isDone = (it) => workSets(it.log).length >= it.target.sets;
 const restFor = (ex) => (ex.kind === 'compound' ? S.cfg.rest.compound : S.cfg.rest.isolation);
 const restLabel = (ex) => (ex.kind === 'compound' ? 'descanso 2–3 min' : 'descanso 60–90 s');
@@ -149,16 +178,19 @@ function routineView(k) {
   const g = A.guide && A.guide.k === k ? A.guide : null;
   const isWarm = k === 'warm';
   const curId = g ? g.steps[g.s]?.id : null;
-  const tip = isWarm
+  const flex = A.kind === 'flex';
+  const tip = flex
+    ? (isWarm ? 'Dois movimentos para aquecer o corpo antes de alongar.' : 'Escolhidos pelos músculos mais treinados nos últimos 7 dias. 60 s por músculo, tensão ligeira e a respirar devagar. Sem pressa: é tempo de recuperação.')
+    : isWarm
     ? 'Escolhido para os músculos de hoje: subir a temperatura, mobilizar e ativar. Só movimentos dinâmicos (alongar parado antes de treinar pode tirar força). Depois, no primeiro exercício de cada grupo muscular, 1–2 séries de aproximação (botão W) com ~50% e ~75% da carga.'
     : 'Manter cada posição sem balanços, a expirar devagar: tensão ligeira, nunca dor. Os músculos principais de hoje levam 60 s; os de ontem (marcados) 30 s, suaves. Para a flexibilidade conta o tempo acumulado por músculo ao longo da semana.';
   return `<div class="focus">
     ${header(A)}${segs(A)}
     <div class="stage-hero">
-      <div class="lbl">${isWarm ? 'Antes dos exercícios' : 'Depois dos exercícios'}</div>
+      <div class="lbl">${flex ? 'Sessão de flexibilidade' : isWarm ? 'Antes dos exercícios' : 'Depois dos exercícios'}</div>
       <h1 class="ex-name">${isWarm ? 'Aquecimento' : 'Alongamentos'}</h1>
       <div class="mut ex-target">${moves.length} movimentos · ~${routineMinutes(moves)} min · ${isWarm ? 'mobilidade dinâmica' : 'estáticos, para a flexibilidade'}</div>
-      ${A.focus?.today?.length ? `<div class="small mt-s focus-m"><span class="gold">Hoje:</span> ${mList(A.focus.today)}${A.focus.yesterday?.length ? ` · <span class="mut">ontem: ${mList(A.focus.yesterday)}</span>` : ''}</div>` : ''}
+      ${A.focus?.today?.length ? `<div class="small mt-s focus-m"><span class="gold">${flex ? 'Foco:' : 'Hoje:'}</span> ${mList(A.focus.today)}${A.focus.yesterday?.length ? ` · <span class="mut">ontem: ${mList(A.focus.yesterday)}</span>` : ''}</div>` : ''}
     </div>
     ${g ? guidePanel(g) : !all ? `<button class="btn btn-gold btn-xl btn-block mt" data-act="g-start" data-k="${k}">${icon('play')} ${rDone(k) ? 'Continuar guiado' : 'Iniciar guiado'}</button>` : ''}
     <div class="checklist mob-list">${moves.map((m) => `<button class="check-row ${R.done[m.id] ? 'on' : ''} ${m.id === curId ? 'cur' : ''}" data-act="r-toggle" data-k="${k}" data-id="${m.id}">
@@ -167,8 +199,8 @@ function routineView(k) {
         <span class="mut small tnum dose">${doseText(m)}</span></button>`).join('')}</div>
     <p class="mut small mt-s">${tip}</p>
     ${isWarm
-      ? `<button class="btn ${all ? 'btn-gold' : ''} btn-xl btn-block mt" data-act="s-goto" data-i="0">${all ? 'Começar os exercícios' : 'Passar aos exercícios'} ${icon('right')}</button>`
-      : `<button class="btn ${all ? 'btn-gold' : ''} btn-xl btn-block mt" data-act="s-finish">${icon('flag')} Terminar treino</button>`}
+      ? `<button class="btn ${all ? 'btn-gold' : ''} btn-xl btn-block mt" data-act="s-goto" data-i="0">${flex ? 'Alongamentos' : all ? 'Começar os exercícios' : 'Passar aos exercícios'} ${icon('right')}</button>`
+      : `<button class="btn ${all ? 'btn-gold' : ''} btn-xl btn-block mt" data-act="s-finish">${icon('flag')} Terminar ${flex ? 'sessão' : 'treino'}</button>`}
     ${nav()}
   </div>`;
 }
@@ -179,6 +211,7 @@ export function render_() {
   if (!A) return `<div class="focus empty"><p class="mut">Não há treino em curso.</p><a class="btn btn-gold" href="#treino">Ver treinos</a></div>`;
   if (stageOf() === 'warm' && hasR('warm')) return routineView('warm');
   if (stageOf() === 'cool' && hasR('cool')) return routineView('cool');
+  if (!A.items.length) return hasR('cool') ? routineView('cool') : routineView('warm');
   const it = curItem();
   const ex = exOf(it);
   const last = lastOf(it);
@@ -215,6 +248,7 @@ export function render_() {
           <div class="stepper-v"><input class="step-in tnum" id="d-reps" inputmode="numeric" value="${A.draft.reps}" placeholder="0" data-draft="reps"><span class="mut small">${unit}</span></div>
           <button data-act="s-step" data-f="reps" data-d="1" aria-label="Mais">${icon('plus')}</button></div>
       </div>
+      ${isBarbell(ex) ? `<button class="btn btn-ghost btn-sm btn-block plates-b" data-act="s-plates">${icon('barbell', 'ic-sm')} Discos para esta carga</button>` : ''}
       <div class="entry-actions"><button class="btn btn-w ${A.draft.w ? 'on' : ''}" data-act="s-warm" aria-pressed="${A.draft.w}">W</button>
         <button class="btn btn-gold btn-xl" data-act="s-log">Série feita</button></div>
     </div>`;
@@ -241,7 +275,8 @@ export function render_() {
     ${header(A)}
     ${segs(A)}
     <div class="photo">${exPhoto(ex)}<span class="photo-tag">${A.cur + 1}/${A.items.length}</span></div>
-    <h1 class="ex-name">${esc(ex.name)}</h1>
+    <div class="ex-head"><h1 class="ex-name">${esc(ex.name)}</h1><button class="btn btn-ghost btn-sm" data-act="s-swap">${icon('swap')} Trocar</button></div>
+    ${it.swappedFrom ? `<div class="mut small">Em vez de ${esc(S.cfg.exercises[it.swappedFrom]?.name || 'outro exercício')}</div>` : ''}
     <div class="mut ex-target">${it.target.sets} × ${it.target.repMin}${it.target.repMax !== it.target.repMin ? '–' + it.target.repMax : ''} ${unit}${ex.perSide ? ' por perna' : ''} · ${A.readapt ? '3–4' : '1–2'} reps em reserva · ${restLabel(ex)}</div>
     ${sugg && !ws.length ? `<div class="sugg">${icon('trend')} <span>${esc(sugg.text)}</span></div>` : ''}
     <div class="sets">${logRows}</div>
@@ -453,6 +488,64 @@ export const actions = {
       saveActive(); closeSheet(); render();
     };
   },
+  's-swap'() {
+    readDraftInputs();
+    const A = S.active;
+    const it = curItem();
+    const inSession = A.items.map((x) => x.exerciseId);
+    const alts = similarExercises(S.cfg, it.exerciseId, inSession, 10);
+    const all = Object.values(S.cfg.exercises).filter((e) => !inSession.includes(e.id) && !alts.some((a) => a.ex.id === e.id)).sort((a, b) => a.name.localeCompare(b.name));
+    const mus = (e) => Object.entries(e.muscles || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([m]) => ML[m]?.toLowerCase()).filter(Boolean).join(', ');
+    const row = (e, tag) => `<button class="list-row" data-ex="${e.id}">${exThumb(e)}<span class="list-main">${esc(e.name)}${tag ? `<span class="mut small block">${tag}</span>` : ''}</span>${icon('right', 'ic-mut')}</button>`;
+    const ws = workSets(it.log).length;
+    const body = openSheet(`<div class="sheet-title">Trocar ${esc(exOf(it).name)}</div>
+      <p class="mut small">Só neste treino: o plano não muda. ${ws ? `As ${ws} séries já feitas ficam registadas e as que faltam passam para o novo exercício.` : 'O novo exercício fica com as mesmas séries e gama de repetições.'}</p>
+      ${alts.length ? `<div class="lbl mt-s">Mesmos músculos</div><div class="list">${alts.map((a) => row(a.ex, mus(a.ex))).join('')}</div>` : ''}
+      <details class="mt-s"><summary class="lbl">Todos os exercícios</summary><div class="list">${all.map((e) => row(e, mus(e))).join('')}</div></details>`, { cls: 'sheet-tall' });
+    body.querySelectorAll('[data-ex]').forEach((b) => (b.onclick = () => {
+      const id = b.dataset.ex;
+      const from = it.swappedFrom || it.exerciseId;
+      if (!ws) { it.exerciseId = id; it.log = []; it.swappedFrom = from; }
+      else {
+        const left = Math.max(1, it.target.sets - ws);
+        it.target = { ...it.target, sets: ws };
+        A.items.splice(A.cur + 1, 0, { exerciseId: id, target: { ...it.target, sets: left }, log: [], swappedFrom: from });
+        A.cur++;
+      }
+      A.extra = false;
+      A.draft = makeDraft();
+      saveActive();
+      closeSheet();
+      render();
+      toast(`Trocado por ${S.cfg.exercises[id].name}`);
+    }));
+  },
+  's-plates'() {
+    readDraftInputs();
+    const A = S.active;
+    const body = openSheet(`<div class="sheet-title">Discos</div>
+      <div class="grid2">${field('Carga total (kg)', numInput('tot', A.draft.kg === '' ? '' : A.draft.kg))}${field('Barra (kg)', numInput('bar', S.cfg.bar ?? 20))}</div>
+      <div class="plates mt" id="pl-out"></div>
+      <p class="mut small">Discos de 25, 20, 15, 10, 5, 2,5 e 1,25 kg. Barra olímpica: 20 kg; barras EZ e curtas costumam ter 7–10 kg.</p>
+      <button class="btn btn-gold btn-block mt" data-x="ok">Fechar</button>`);
+    const out = body.querySelector('#pl-out');
+    const paint = () => {
+      const tot = num(body.querySelector('[name=tot]').value);
+      const bar = num(body.querySelector('[name=bar]').value);
+      if (!(tot > 0) || !(bar >= 0)) { out.innerHTML = '<span class="mut">Indicar a carga total</span>'; return; }
+      const r = platesFor(tot, bar);
+      out.innerHTML = r.side.length
+        ? `<div class="mut small">Em cada lado</div><div class="plates-v tnum">${platesText(r.side)} kg</div>${r.rest > 0 ? `<div class="mut small">Ficam a faltar ${fmtKg(r.rest)} kg (não há discos tão pequenos)</div>` : ''}`
+        : `<div class="mut">${r.rest < 0 ? 'A carga é menor do que a barra.' : 'Só a barra.'}</div>`;
+    };
+    body.querySelectorAll('input').forEach((i) => i.addEventListener('input', paint));
+    paint();
+    body.querySelector('[data-x=ok]').onclick = () => {
+      const bar = num(body.querySelector('[name=bar]').value);
+      if (bar >= 0 && bar <= 50 && bar !== S.cfg.bar) { S.cfg.bar = bar; saveCfg(); }
+      closeSheet();
+    };
+  },
   's-list'() {
     readDraftInputs();
     const A = S.active;
@@ -496,13 +589,21 @@ export const actions = {
     const A = S.active;
     const missing = A.items.reduce((n, it) => n + Math.max(0, it.target.sets - workSets(it.log).length), 0);
     const total = A.items.reduce((n, it) => n + workSets(it.log).length, 0);
-    if (!total) {
+    const flex = A.kind === 'flex';
+    const moved = rDone('warm') + rDone('cool');
+    if (flex && !moved) {
+      if (await confirmDialog('Ainda não há movimentos feitos.', { ok: 'Sair sem guardar', danger: true, detail: 'Marcar os movimentos feitos (ou usar o guiado) para a sessão ficar registada.' })) {
+        S.active = null; saveActive(); keepAwake(false); go('#hoje');
+      }
+      return;
+    }
+    if (!flex && !total) {
       if (await confirmDialog('Ainda não há séries registadas.', { ok: 'Cancelar treino', danger: true, detail: 'Um treino sem séries não é guardado.' })) {
         S.active = null; saveActive(); keepAwake(false); go('#treino');
       }
       return;
     }
-    if (missing && !(await confirmDialog(`Faltam ${missing} séries. Terminar mesmo assim?`, { ok: 'Terminar' }))) return;
+    if (!flex && missing && !(await confirmDialog(`Faltam ${missing} séries. Terminar mesmo assim?`, { ok: 'Terminar' }))) return;
     A.endedAt = Date.now();
     A.restEnd = null;
     delete A.draft; delete A.extra; delete A.guide; delete A.stage;
@@ -517,12 +618,12 @@ export const actions = {
     const prs = session.items.flatMap((it) => it.log.filter((s) => s.pr).map((s) => ({ ex: exOf(it), s })));
     goThen('#hoje', () => openSheet(`<div class="summary">
       <div class="summary-mark">${icon('checkCircle')}</div>
-      <div class="sheet-title center">${esc(session.name)} concluído</div>
-      <div class="grid3 stats">
+      <div class="sheet-title center">${esc(session.name)} ${flex ? 'concluída' : 'concluído'}</div>
+      ${flex ? '' : `<div class="grid3 stats">
         <div><div class="stat-v tnum">${mmss(st.duration)}</div><div class="mut small">duração</div></div>
         <div><div class="stat-v tnum">${st.sets}</div><div class="mut small">séries</div></div>
         <div><div class="stat-v tnum">${fmt(st.volume)}</div><div class="mut small">kg de volume</div></div>
-      </div>
+      </div>`}
       ${routineSummary(session) ? `<p class="mut small mt-s">${routineSummary(session)}</p>` : ''}
       ${prs.length ? `<div class="lbl mt">Recordes</div>${prs.map((p) => `<div class="row-sb pr-row"><span>${esc(p.ex.name)}</span><span class="gold tnum">${fmtKg(p.s.kg)} kg × ${p.s.reps}</span></div>`).join('')}` : ''}
       <button class="btn btn-gold btn-block mt" data-sheet-done>Fechar</button></div>`).querySelector('[data-sheet-done]').onclick = () => closeSheet());

@@ -22,7 +22,7 @@ function home() {
   const item = (href, ic, t, sub) => `<a class="list-row" href="${href}">${icon(ic)}<span class="list-main">${t}<span class="mut small block">${sub}</span></span>${icon('right', 'ic-mut')}</a>`;
   return `<header class="top"><h1 class="title">Definições</h1></header>
     <section class="card"><div class="list">
-      ${item('#definicoes/plano', 'flag', 'Plano e descanso', `Início ${longDate(S.cfg.startDate)} · semana ${ph.week}`)}
+      ${item('#definicoes/plano', 'flag', 'Plano e descanso', `Início ${longDate(S.cfg.startDate)} · semana ${ph.week} · ${S.cfg.schedule === 'sequence' ? 'em sequência' : 'por dia da semana'}`)}
       ${item('#definicoes/metas', 'food', 'Metas diárias', `${fmt(S.cfg.goals.kcal)} kcal · P ${S.cfg.goals.p} · H ${S.cfg.goals.c} · G ${S.cfg.goals.f} · água`)}
       ${item('#definicoes/treino', 'barbell', 'Plano de treino', `${S.cfg.templates.length} treinos · séries e gamas`)}
       ${item('#definicoes/exercicios', 'camera', 'Exercícios', 'Tipo, incremento, foto')}
@@ -43,6 +43,8 @@ function plano() {
   return `${back('#definicoes', 'Plano e descanso')}
     <section class="card" data-form="plano">
       ${field('Data de início do plano', `<input class="input" type="date" name="startDate" value="${c.startDate}">`, 'A semana do plano conta a partir daqui (blocos de 7 dias).')}
+      ${field('Ordem dos treinos', selectInput('schedule', [['weekday', 'Pelo dia da semana'], ['sequence', 'Em sequência (o próximo que falta)']], c.schedule || 'weekday'),
+        'Em sequência, faltar a um dia não salta o treino: a app propõe sempre o seguinte ao último feito (Push A → Pull A → Legs A → …).')}
       <div class="grid2">${field('Semanas de readaptação', numInput('rw', c.readapt.weeks, 'inputmode="numeric"'))}${field('Séries na readaptação', numInput('rs', c.readapt.sets, 'inputmode="numeric"'))}</div>
       ${toggle('suggest', c.readapt.suggest, 'Sugerir subida de carga durante a readaptação')}
       <div class="lbl mt">Descanso</div>
@@ -290,7 +292,7 @@ export const actions = {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(sd)) return toast('Indicar a data de início');
     if (!(rw >= 0 && rw <= 12) || !(rs >= 1 && rs <= 10)) return toast('Readaptação: semanas 0–12, séries 1–10');
     if (!(rc >= 15 && rc <= 600) || !(ri >= 15 && ri <= 600)) return toast('Descanso entre 15 e 600 s');
-    Object.assign(S.cfg, { startDate: sd, sound: r.querySelector('[name=sound]').checked });
+    Object.assign(S.cfg, { startDate: sd, sound: r.querySelector('[name=sound]').checked, schedule: val(r, 'schedule') === 'sequence' ? 'sequence' : 'weekday' });
     S.cfg.readapt = { weeks: rw, sets: rs, suggest: r.querySelector('[name=suggest]').checked };
     S.cfg.rest = { compound: rc, isolation: ri };
     await saveCfg();

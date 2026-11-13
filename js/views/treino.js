@@ -1,6 +1,6 @@
 // Separador Treino: semana, pré-visualização, histórico de sessões e histórico por exercício.
 import { S, removeSession } from '../store.js';
-import { phase, templateFor, sessionStats, exerciseHistory, workSets, targetSets, routineMinutes, routinesFor, resolveMoves } from '../logic.js';
+import { phase, templateFor, sessionStats, exerciseHistory, workSets, targetSets, routineMinutes, routinesFor, resolveMoves, tplOrder } from '../logic.js';
 import { dateKey, mondayOf, addDays, DIAS_CURTOS, shortDate, longDate, esc, fmt, fmtKg, mmss, weekday } from '../util.js';
 import { icon, exThumb, exPhoto, openSheet, closeSheet, lineChart, confirmDialog, render as rerender } from '../ui.js';
 import { startSession, routineSummary } from './sessao.js';
@@ -26,7 +26,16 @@ function mainView() {
   const ph = phase(S.cfg, today);
   const mon = mondayOf(today);
   const week = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
-  const rows = week.map((d) => {
+  const seq = S.cfg.schedule === 'sequence';
+  const next = templateFor(S.cfg, today, S.sessions);
+  const seqRows = tplOrder(S.cfg).map((tpl) => {
+    const last = S.sessions.find((s) => s.endedAt && s.templateId === tpl.id);
+    const isNext = next?.id === tpl.id;
+    return `<button class="week-row ${isNext ? 'today' : ''}" data-act="t-preview" data-id="${tpl.id}">
+      <span class="week-n">${esc(tpl.name)}<span class="mut small block">${last ? 'Último: ' + shortDate(last.date) : 'Ainda não feito'}</span></span>
+      <span class="week-s">${isNext ? '<span class="tag tag-gold">a seguir</span>' : ''}</span></button>`;
+  }).join('');
+  const rows = seq ? seqRows : week.map((d) => {
     const wd = weekday(d);
     const tpl = S.cfg.templates.find((t) => t.weekday === wd);
     const done = S.sessions.some((s) => s.date === d && s.endedAt && (!tpl || s.templateId === tpl.id));
@@ -41,7 +50,7 @@ function mainView() {
     const st = sessionStats(s);
     return `<button class="list-row" data-act="t-session" data-id="${s.id}">
       <span class="list-main">${esc(s.name)}<span class="mut small block">${longDate(s.date)}</span></span>
-      <span class="mut small tnum">${mmss(st.duration)} · ${st.sets} séries</span>${icon('right', 'ic-mut')}</button>`;
+      <span class="mut small tnum">${mmss(st.duration)} · ${s.kind === 'flex' ? routineSummary(s).replace('Aquecimento', 'mobilidade').split(' · ').pop() : st.sets + ' séries'}</span>${icon('right', 'ic-mut')}</button>`;
   }).join('');
 
   const used = new Set(S.sessions.flatMap((s) => s.items.filter((i) => workSets(i.log).length).map((i) => i.exerciseId)));
@@ -52,7 +61,7 @@ function mainView() {
       <span class="tag ${ph.readapt ? 'tag-gold' : ''}">${ph.week ? `Semana ${ph.week} · ${ph.label.toLowerCase()}` : 'Antes do início'}</span></header>
     ${S.active ? `<a class="banner banner-live" href="#sessao"><span class="live-dot"></span><span><b>${esc(S.active.name)}</b> em curso</span><span class="gold">Voltar ${icon('right')}</span></a>` : ''}
     <section class="card">
-      <div class="lbl">Esta semana</div>
+      <div class="lbl">${seq ? 'Sequência' : 'Esta semana'}</div>
       <div class="week">${rows}</div>
       <p class="mut small mt-s">${ph.readapt ? `Readaptação: ${S.cfg.readapt.sets} séries por exercício, parar com 3–4 reps em reserva.` : 'Séries completas, parar com 1–2 reps em reserva. Progressão dupla ativa.'}</p>
     </section>
@@ -125,7 +134,7 @@ export const actions = {
     const tpl = S.cfg.templates.find((t) => t.id === d.id);
     if (!tpl) return;
     const date = dateKey();
-    const isToday = templateFor(S.cfg, date)?.id === tpl.id;
+    const isToday = templateFor(S.cfg, date, S.sessions)?.id === tpl.id;
     const R = routinesFor(S.cfg, tpl, date, S.sessions);
     const body = openSheet(`<div class="sheet-title">${esc(tpl.name)}</div>
       <div class="list">${routineRow(R.warmup, 'Aquecimento')}${tpl.items.map((i) => {

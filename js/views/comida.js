@@ -1,7 +1,7 @@
 // Separador Alimentação: totais do dia, registo livre a partir da base de alimentos (categorias, porções,
 // recentes), entrada rápida, refeições do plano e favoritas, água e histórico.
 import { S, day, saveDay, saveCfg } from '../store.js';
-import { macrosFor, sumMacros, normText, recentFoods } from '../logic.js';
+import { macrosFor, sumMacros, normText, recentFoods, proteinIdeas, offToFood, dayTotals } from '../logic.js';
 import { SLOTS } from '../seed.js';
 import { FOOD_CATS } from '../foods-db.js';
 import { dateKey, addDays, longDate, esc, fmt, num, uid, round } from '../util.js';
@@ -64,6 +64,7 @@ export function render_() {
         <button class="icon-btn" data-act="f-day" data-d="1" aria-label="Dia seguinte" ${isToday ? 'disabled' : ''}>${icon('right')}</button>
       </div></header>
     ${nutritionCard(date, { title: isToday ? 'Totais de hoje' : 'Totais do dia' })}
+    ${isToday && entries.length ? proteinCard(d) : ''}
     <div class="grid3 quick">
       <button class="btn btn-gold quick-b" data-act="f-add">${icon('search')}<span>Alimento</span></button>
       <button class="btn quick-b" data-act="f-meals">${icon('list')}<span>Refeições</span></button>
@@ -74,6 +75,17 @@ export function render_() {
     <p class="mut small center">Valores médios de referência, aproximados. Com rótulo, confirmar e corrigir na <a class="link" href="#definicoes/alimentos">base de alimentos</a>.</p>`;
 }
 export { render_ as render };
+
+/** "Faltam 50 g de proteína": 3 ideias com os alimentos ricos em proteína (os usados recentemente primeiro). */
+function proteinCard(d) {
+  const gap = Math.round(S.cfg.goals.p - dayTotals(d).p);
+  const ideas = proteinIdeas(S.cfg.foods, recentFoods(S.days, S.cfg.foods, 40), gap);
+  if (!ideas.length) return '';
+  return `<section class="card"><div class="row-sb"><span class="lbl">Faltam ${fmt(gap)} g de proteína</span></div>
+    <div class="list">${ideas.map((i) => { const f = S.cfg.foods[i.foodId]; return `<button class="list-row" data-act="f-idea" data-id="${f.id}" data-q="${i.qty}">
+      <span class="list-main">${esc(f.name)}<span class="mut small block">${esc(i.label)} · ${fmt(macrosFor(f, i.qty).kcal)} kcal</span></span>
+      <span class="gold tnum small">+${fmt(i.p)} g</span>${icon('plus', 'ic-mut')}</button>`; }).join('')}</div></section>`;
+}
 
 /* ---------- Escolher alimento (pesquisa, categorias, recentes) ---------- */
 let pk = null; // { slot, q, cat, added }
@@ -108,7 +120,7 @@ function pickerHTML() {
     <div class="search">${icon('search')}<input class="input" id="f-q" placeholder="Procurar (ex.: frango, iogurte, pão)" value="${esc(pk.q)}" autocomplete="off" enterkeyhint="search"></div>
     <div class="chips cat-chips" id="f-cats">${cats.map(([k, l]) => `<button class="chip ${pk.cat === k && !pk.q.trim() ? 'on' : ''}" data-cat="${k}">${esc(l.split(',')[0])}</button>`).join('')}</div>
     <div class="list food-pick" id="f-list">${pickList()}</div>
-    <div class="grid2 mt-s"><button class="btn btn-sm" data-x="quick">${icon('bolt')} Entrada rápida</button><button class="btn btn-sm" data-x="new">${icon('plus')} Criar alimento</button></div>
+    <div class="grid3 mt-s"><button class="btn btn-sm" data-x="scan">${icon('scan')} Código</button><button class="btn btn-sm" data-x="quick">${icon('bolt')} Rápida</button><button class="btn btn-sm" data-x="new">${icon('plus')} Criar</button></div>
     ${pk.added ? `<button class="btn btn-gold btn-block mt-s" data-x="done">Concluído · ${pk.added} adicionado${pk.added > 1 ? 's' : ''}</button>` : ''}`;
 }
 
@@ -145,12 +157,93 @@ function wirePicker(body) {
   body.querySelectorAll('[data-cat]').forEach((c) => (c.onclick = () => { pk.cat = c.dataset.cat; pk.q = ''; q.value = ''; paintList(); listEl.scrollTop = 0; }));
   body.querySelector('[name=pk-slot]').onchange = (ev) => { pk.slot = ev.target.value; };
   body.querySelector('[data-x=quick]').onclick = () => quickForm(null, { fromPicker: true });
-  body.querySelector('.grid2 [data-x=new]').onclick = newFood;
+  body.querySelector('.grid3 [data-x=new]').onclick = newFood;
+  body.querySelector('[data-x=scan]').onclick = barcodeForm;
   body.querySelector('[data-x=done]')?.addEventListener('click', () => closeSheet());
   wireList();
 }
 function newFood() {
   foodEditor(null, (f) => qtyForm(f, { fromPicker: true }), { name: pk?.q.trim() || '' });
+}
+
+/* ---------- Código de barras (Open Food Facts) ---------- */
+// Só o código vai à internet (base aberta Open Food Facts); os registos nunca saem do telemóvel.
+const OFF_URL = (code) => `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_pt,generic_name,brands,quantity,serving_quantity,nutriments`;
+
+function barcodeForm() {
+  const cam = 'BarcodeDetector' in window && !!navigator.mediaDevices?.getUserMedia;
+  const html = `<button class="btn btn-ghost btn-sm back-b" data-x="back">${icon('left')} Lista</button>
+    <div class="sheet-title">Código de barras</div>
+    ${cam ? `<div class="scan"><video id="bc-v" playsinline muted></video><div class="scan-line"></div></div><p class="mut small center" id="bc-st">A abrir a câmara…</p>`
+          : `<p class="mut small">Este browser não lê códigos pela câmara (o Safari do iPhone, por exemplo). Escrever os números que estão por baixo das barras.</p>`}
+    <div class="row-g mt-s">${textInput('code', '', 'inputmode="numeric" placeholder="5601234567890" autocomplete="off"' + (cam ? '' : ' autofocus'))}<button class="btn btn-gold" data-x="go">Procurar</button></div>
+    <p class="mut small mt-s">Valores do <a class="link" href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>, uma base aberta preenchida por voluntários: confirmar com o rótulo. Só o código é enviado; os registos ficam no telemóvel. O produto fica guardado na base de alimentos e da próxima vez funciona sem internet.</p>`;
+  const body = updateSheet(html);
+  body.querySelector('[data-x=back]').onclick = showPicker;
+  const inp = body.querySelector('[name=code]');
+  const go = () => lookupBarcode(inp.value);
+  body.querySelector('[data-x=go]').onclick = go;
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  if (cam) startScan(body);
+}
+
+async function startScan(body) {
+  const video = body.querySelector('#bc-v');
+  const st = body.querySelector('#bc-st');
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+  } catch {
+    if (st) st.textContent = 'Sem acesso à câmara. Escrever o código à mão.';
+    video.parentElement.remove();
+    return;
+  }
+  const stop = () => stream.getTracks().forEach((t) => t.stop());
+  if (!video.isConnected) return stop();
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  if (st) st.textContent = 'Apontar para o código de barras';
+  let det;
+  try { det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] }); } catch { det = new BarcodeDetector(); }
+  const loop = async () => {
+    if (!video.isConnected) return stop();
+    try {
+      const codes = await det.detect(video);
+      if (codes.length) {
+        stop();
+        vibrate(40);
+        lookupBarcode(codes[0].rawValue);
+        return;
+      }
+    } catch { /* fotograma ainda sem imagem */ }
+    setTimeout(loop, 250);
+  };
+  loop();
+}
+
+async function lookupBarcode(raw) {
+  const code = String(raw || '').replace(/\D/g, '');
+  if (code.length < 8 || code.length > 14) { toast('Código inválido (8 a 14 algarismos)'); return; }
+  const local = Object.values(S.cfg.foods).find((f) => f.barcode === code);
+  if (local) { qtyForm(local, { fromPicker: true }); return; }
+  if (!navigator.onLine) { toast('Sem internet: criar o alimento à mão com os valores do rótulo'); return; }
+  toast('A procurar…');
+  let food = null;
+  try {
+    const res = await fetch(OFF_URL(code));
+    const j = res.ok ? await res.json() : null;
+    food = j && j.status === 1 ? offToFood(code, j.product) : null;
+  } catch { toast('Sem ligação ao Open Food Facts. Tentar de novo ou criar à mão'); return; }
+  if (!topSheet()) return; // folha fechada entretanto
+  if (!food) {
+    toast('Produto sem valores nutricionais na base. Criar com os valores do rótulo');
+    foodEditor(null, (f) => { f.barcode = code; saveCfg(); qtyForm(f, { fromPicker: true }); }, { name: '' });
+    return;
+  }
+  S.cfg.foods[food.id] = food;
+  await saveCfg();
+  toast('Encontrado. Confirmar os valores com o rótulo');
+  qtyForm(food, { fromPicker: true });
 }
 
 function addEntry(food, q, slot) {
@@ -166,11 +259,11 @@ function addEntry(food, q, slot) {
 }
 
 /* ---------- Quantidade: gramas ou porções ---------- */
-function qtyForm(food, { entry, fromPicker } = {}) {
+function qtyForm(food, { entry, fromPicker, qty: q0 } = {}) {
   const date = curDate();
   const last = recentFoods(S.days, S.cfg.foods, 200).find((r) => r.foodId === food.id);
   const portions = food.basis === 'un' ? [] : food.portions || [];
-  let qty = entry ? entry.qty : last ? last.qty : portions[0] ? portions[0].qty : food.basis === 'un' ? 1 : 100;
+  let qty = entry ? entry.qty : q0 > 0 ? q0 : last ? last.qty : portions[0] ? portions[0].qty : food.basis === 'un' ? 1 : 100;
   // porção selecionada: { i, n } se a quantidade for um múltiplo (½, 1, 1½…) de uma porção
   let sel = null;
   portions.forEach((p, i) => { const n = qty / p.qty; if (!sel && n >= 0.5 && Math.abs(n * 2 - Math.round(n * 2)) < 1e-6) sel = { i, n: Math.round(n * 2) / 2 }; });
@@ -419,6 +512,12 @@ export const actions = {
   },
   'f-today'() { viewDate = null; render(); },
   'f-add'(d) { openPicker(d.slot); },
+  'f-idea'(d) {
+    const f = S.cfg.foods[d.id];
+    if (!f) return;
+    pk = null;
+    qtyForm(f, { qty: +d.q });
+  },
   'f-quick'() { pk = null; quickForm(null); },
   'f-edit'(d) {
     const date = curDate();
