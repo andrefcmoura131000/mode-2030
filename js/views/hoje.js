@@ -1,6 +1,6 @@
 // Ecrã "Hoje": treino do dia, macros, água, suplementos e lembrete de backup.
 import { S } from '../store.js';
-import { phase, templateFor, sessionStats, routineMinutes } from '../logic.js';
+import { phase, templateFor, sessionStats, routineMinutes, routinesFor, resolveMoves } from '../logic.js';
 import { dateKey, longDate, esc, mmss, daysBetween } from '../util.js';
 import { icon, exThumb } from '../ui.js';
 import { nutritionCard, waterCard, suppCard } from '../widgets.js';
@@ -31,9 +31,9 @@ function workoutCard(date) {
   }
   const done = doneToday.find((s) => s.templateId === tpl.id);
   const n = tpl.items.length;
-  const mv = (ids) => (ids || []).map((id) => S.cfg.mobility?.[id]).filter(Boolean);
-  const wMin = mv(tpl.warmup).length ? routineMinutes(mv(tpl.warmup)) : 0;
-  const cMin = mv(tpl.cooldown).length ? routineMinutes(mv(tpl.cooldown)) : 0;
+  const R = routinesFor(S.cfg, tpl, date, S.sessions);
+  const wMin = R.warmup.length ? routineMinutes(resolveMoves(S.cfg, R.warmup)) : 0;
+  const cMin = R.cooldown.length ? routineMinutes(resolveMoves(S.cfg, R.cooldown)) : 0;
   const thumbs = tpl.items.slice(0, 6).map((i) => S.cfg.exercises[i.exerciseId]).filter(Boolean).map(exThumb).join('');
   if (done) {
     const st = sessionStats(done);

@@ -176,6 +176,106 @@ export function guideAdvance(g, now) {
 export function guidePause(g, now) { return g.end ? { ...g, left: Math.max(0, g.end - now), end: null } : g; }
 export function guideResume(g, now) { return g.left != null ? { ...g, end: now + g.left, left: null } : g; }
 
+/* ---------- Escolha automática do aquecimento e dos alongamentos ---------- */
+
+/** Carga por músculo: soma de (peso do músculo no exercício × séries). items: [{ exerciseId, sets }] */
+export function muscleLoad(cfg, items) {
+  const load = {};
+  for (const it of items || []) {
+    const ms = cfg.exercises[it.exerciseId]?.muscles || {};
+    for (const [m, w] of Object.entries(ms)) load[m] = (load[m] || 0) + w * (it.sets || 0);
+  }
+  return load;
+}
+
+/** Exercícios feitos ontem (só séries normais), no formato { exerciseId, sets }. */
+export function yesterdayItems(sessions, date) {
+  const y = addDays(date, -1);
+  return sessions.filter((s) => s.date === y && s.endedAt).flatMap((s) => s.items.map((i) => ({ exerciseId: i.exerciseId, sets: workSets(i.log).length })).filter((i) => i.sets));
+}
+
+const MAIN = 3;   // carga a partir da qual o músculo é "principal" no dia (≈ 3 séries diretas)
+const WORKED = 1.5; // carga mínima para contar como trabalhado
+
+/**
+ * Escolhe o aquecimento e os alongamentos (regras em mobility-db.js):
+ *  - aquecimento: 1 cardio leve adequado + movimentos dinâmicos que cubram os músculos de hoje
+ *    (até 5) + 1 para a rigidez dos músculos fortes de ontem que hoje não trabalham;
+ *  - alongamentos: 1 por músculo trabalhado hoje, 60 s nos principais e 40 s nos restantes (até 6),
+ *    + até 2 suaves (30 s) para os músculos principais de ontem que ficaram de fora.
+ * Devolve listas de { id, val, why: 'hoje' | 'ontem' } e as cargas usadas.
+ */
+export function buildRoutines(cfg, todayItems, yItems = []) {
+  const moves = Object.values(cfg.mobility || {}).filter((m) => m.muscles?.length);
+  const today = muscleLoad(cfg, todayItems);
+  const yest = muscleLoad(cfg, yItems);
+  const worked = Object.keys(today).filter((m) => today[m] >= WORKED);
+  const yOnly = Object.keys(yest).filter((m) => yest[m] >= MAIN && !(today[m] >= WORKED)).sort((a, b) => yest[b] - yest[a]);
+
+  // pontuação: músculos ainda por cobrir valem tudo, os já cobertos valem pouco; o principal do movimento vale mais
+  const score = (m, load, covered) => m.muscles.reduce((s, k, i) => s + (load[k] || 0) * (covered.has(k) ? 0.25 : 1) * (i === 0 ? 1.5 : 1), 0);
+  const best = (pool, load, covered) => {
+    let b = null, bs = 0;
+    for (const m of pool) { const x = score(m, load, covered); if (x > bs) { b = m; bs = x; } }
+    return b;
+  };
+  const wLoad = Object.fromEntries(worked.map((m) => [m, today[m]]));
+
+  // Aquecimento: cardio leve + até 5 movimentos dinâmicos para os músculos de hoje + 1 para os de ontem
+  const warmup = [];
+  const raise = best(moves.filter((m) => m.kind === 'raise'), today, new Set());
+  if (raise) warmup.push({ id: raise.id, val: raise.val, why: 'hoje' });
+  let pool = moves.filter((m) => m.kind === 'warm');
+  const covered = new Set();
+  for (let n = 0; n < 5; n++) {
+    const m = best(pool, wLoad, covered);
+    if (!m) break;
+    warmup.push({ id: m.id, val: m.val, why: 'hoje' });
+    m.muscles.forEach((k) => covered.add(k));
+    pool = pool.filter((x) => x !== m);
+  }
+  if (yOnly.length) {
+    const m = best(pool, Object.fromEntries(yOnly.map((k) => [k, yest[k]])), new Set());
+    if (m) warmup.push({ id: m.id, val: m.val, why: 'ontem' });
+  }
+
+  // Alongamentos: um por músculo (como músculo principal do alongamento), dos mais trabalhados para os menos
+  const cooldown = [];
+  pool = moves.filter((m) => m.kind === 'stretch');
+  const done = new Set();
+  const stretchFor = (k, load) => {
+    const own = pool.filter((m) => m.muscles[0] === k);
+    return best(own.length ? own : pool.filter((m) => m.muscles.includes(k)), load, done);
+  };
+  const add = (k, val, why, load) => {
+    const m = stretchFor(k, load);
+    if (!m) return;
+    cooldown.push({ id: m.id, val, why });
+    done.add(m.muscles[0]);
+    pool = pool.filter((x) => x !== m);
+  };
+  for (const k of [...worked].sort((a, b) => today[b] - today[a])) {
+    if (cooldown.length >= 6) break;
+    if (!done.has(k)) add(k, today[k] >= MAIN ? 60 : 40, 'hoje', wLoad);
+  }
+  const yLoad = Object.fromEntries(yOnly.map((k) => [k, yest[k]]));
+  for (const k of yOnly.slice(0, 2)) if (!done.has(k)) add(k, 30, 'ontem', yLoad);
+  return { warmup, cooldown, today, yesterday: yest };
+}
+
+/** Rotina de um treino para uma data: automática, ou as listas fixas do treino. */
+export function routinesFor(cfg, tpl, date, sessions) {
+  if (tpl.routine === 'manual') {
+    const map = (ids) => (ids || []).filter((id) => cfg.mobility?.[id]).map((id) => ({ id, val: cfg.mobility[id].val, why: 'hoje' }));
+    return { warmup: map(tpl.warmup), cooldown: map(tpl.cooldown), today: {}, yesterday: {}, manual: true };
+  }
+  const items = tpl.items.map((i) => ({ exerciseId: i.exerciseId, sets: targetSets(cfg, i.sets, date) }));
+  return buildRoutines(cfg, items, yesterdayItems(sessions, date));
+}
+
+/** Músculos principais por ordem de carga (para mostrar "Hoje: peito, ombros…"). */
+export const topMuscles = (load, min = MAIN) => Object.keys(load).filter((m) => load[m] >= min).sort((a, b) => load[b] - load[a]);
+
 /* ---------- Nutrição ---------- */
 
 /** Texto para pesquisa: minúsculas e sem acentos. */
@@ -267,3 +367,6 @@ export function weekSummary(state, monday) {
     water: mean(waterDays), foodDays: foodDays.length,
   };
 }
+
+/** [{ id, val, why }] → movimentos completos com a duração do dia. */
+export const resolveMoves = (cfg, list) => (list || []).filter((x) => cfg.mobility?.[x.id]).map((x) => ({ ...cfg.mobility[x.id], val: x.val, why: x.why }));

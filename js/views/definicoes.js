@@ -1,7 +1,8 @@
 // Definições: plano, metas, treino, exercícios, alimentos, refeições, suplementos, backup e dados.
 import { S, saveCfg, allEntries, replaceAll, reload, setPhoto } from '../store.js';
-import { phase, doseText, routineMinutes, normText } from '../logic.js';
-import { SLOTS, SUPP_MOMENTS, seedConfig, defaultRoutine } from '../seed.js';
+import { phase, doseText, routineMinutes, normText, routinesFor, resolveMoves } from '../logic.js';
+import { MUSCLES } from '../mobility-db.js';
+import { SLOTS, SUPP_MOMENTS, seedConfig, NEW_ROUTINE } from '../seed.js';
 import { FOOD_CATS } from '../foods-db.js';
 import { dateKey, longDate, esc, fmt, fmtKg, num, uid, DIAS } from '../util.js';
 import { icon, openSheet, closeSheet, field, numInput, textInput, selectInput, toast, confirmDialog, go, render, exThumb, resizeImage } from '../ui.js';
@@ -94,8 +95,9 @@ function treinoEdit(id) {
       <p class="mut small">Mín./Máx. = gama de repetições (no Plank, segundos).</p>
       ${rows}
       <button class="btn btn-block mt-s" data-act="d-tpl-add">${icon('plus')} Adicionar exercício</button>
-      ${mobSection('warmup', 'Aquecimento (antes)', 'warm')}
-      ${mobSection('cooldown', 'Alongamentos (no fim)', 'stretch')}
+      <div class="lbl mt">Aquecimento e alongamentos</div>
+      <label class="toggle"><input type="checkbox" name="routineAuto" data-change="d-tpl-routine" ${tplDraft.routine !== 'manual' ? 'checked' : ''}><span>Automático: escolhidos pelos músculos deste treino e do treino de ontem (recomendado)</span></label>
+      ${tplDraft.routine === 'manual' ? mobSection('warmup', 'Aquecimento (antes)', 'warm') + mobSection('cooldown', 'Alongamentos (no fim)', 'stretch') : autoPreview()}
       <button class="btn btn-gold btn-block mt" data-act="d-tpl-save">Guardar treino</button>
       <button class="btn btn-ghost btn-block mt-s danger" data-act="d-tpl-del">${icon('trash')} Apagar treino</button>
     </section>`;
@@ -115,17 +117,47 @@ function mobSection(key, title, kind) {
     ${opts.length ? `<div class="row-g mt-s">${selectInput('mob_' + key, opts, '')}<button class="btn btn-sm" data-act="d-tpl-mob-add" data-k="${key}" aria-label="Acrescentar">${icon('plus')}</button></div>` : ''}`;
 }
 
+function autoPreview() {
+  const R = routinesFor(S.cfg, { ...tplDraft, routine: 'auto' }, dateKey(), []);
+  const line = (l) => resolveMoves(S.cfg, l).map((m) => esc(m.name.split(' (')[0])).join(' · ');
+  return `<p class="mut small">Sem treino na véspera ficaria assim (no dia, junta-se o que foi treinado ontem):</p>
+    <p class="small"><span class="gold">Aquecimento:</span> ${line(R.warmup) || '—'}</p>
+    <p class="small"><span class="gold">Alongamentos:</span> ${line(R.cooldown) || '—'}</p>`;
+}
+
+/** Músculos do exercício: os escolhidos ficam principais (1); os secundários antigos mantêm-se se não forem desmarcados. */
+function musclesFrom(old, primary) {
+  const out = {};
+  for (const [k, w] of Object.entries(old)) if (w < 1) out[k] = w;
+  for (const k of primary) out[k] = 1;
+  return out;
+}
+
+/** Botões para escolher músculos; a ordem dos escolhidos conta (o 1.º é o principal). */
+const muscleChips = (sel) => `<div class="chips" data-muscles>${MUSCLES.map(([k, l]) => `<button type="button" class="chip ${sel.includes(k) ? 'on' : ''}" data-mus="${k}">${l}</button>`).join('')}</div>`;
+function wireMuscles(body, sel) {
+  const order = [...sel];
+  body.querySelectorAll('[data-mus]').forEach((b) => (b.onclick = (ev) => {
+    ev.preventDefault();
+    const k = b.dataset.mus;
+    const i = order.indexOf(k);
+    if (i >= 0) order.splice(i, 1); else order.push(k);
+    b.classList.toggle('on', i < 0);
+  }));
+  return () => [...order];
+}
+
 function mobilidade() {
   const all = Object.values(S.cfg.mobility || {});
   const group = (kind, title) => {
     const rows = all.filter((m) => m.kind === kind).sort((a, b) => a.name.localeCompare(b.name)).map((m) =>
-      `<button class="list-row" data-act="d-mob" data-id="${m.id}"><span class="list-main">${esc(m.name)}<span class="mut small block">${doseText(m)}${m.cue ? ' · ' + esc(m.cue) : ''}</span></span>${icon('edit', 'ic-mut')}</button>`).join('');
+      `<button class="list-row" data-act="d-mob" data-id="${m.id}">${exThumb(m)}<span class="list-main">${esc(m.name)}<span class="mut small block">${doseText(m)}${m.cue ? ' · ' + esc(m.cue) : ''}</span></span>${icon('edit', 'ic-mut')}</button>`).join('');
     return `<section class="card"><div class="lbl">${title}</div><div class="list">${rows || '<p class="mut">Nenhum.</p>'}</div>
       <button class="btn btn-block mt" data-act="d-mob" data-id="" data-kind="${kind}">${icon('plus')} Novo</button></section>`;
   };
   return `${back('#definicoes', 'Aquecimento e alongamentos')}
-    <p class="mut small">Aquecimento: mobilidade dinâmica antes dos exercícios. Alongamentos: estáticos no fim, 30–60 s por posição. Para escolher os que entram em cada treino: Plano de treino → abrir o treino.</p>
-    ${group('warm', 'Aquecimento')}${group('stretch', 'Alongamentos')}`;
+    <p class="mut small">Aquecimento: mobilidade dinâmica antes dos exercícios. Alongamentos: estáticos no fim, 30–60 s por posição. Por defeito a app escolhe-os sozinha, pelos músculos do treino de hoje e de ontem. Os músculos de cada movimento servem para essa escolha.</p>
+    ${group('raise', 'Cardio leve (início do aquecimento)')}${group('warm', 'Aquecimento dinâmico')}${group('stretch', 'Alongamentos')}`;
 }
 
 function exercicios() {
@@ -230,6 +262,8 @@ function readTpl() {
   if (!root || !tplDraft) return;
   tplDraft.name = val(root, 'name').trim() || tplDraft.name;
   tplDraft.weekday = +val(root, 'weekday');
+  const auto = root.querySelector('[name=routineAuto]');
+  if (auto) tplDraft.routine = auto.checked ? 'auto' : 'manual';
   tplDraft.items.forEach((it, i) => {
     it.exerciseId = val(root, `ex_${i}`) || it.exerciseId;
     it.sets = parseInt(val(root, `s_${i}`), 10);
@@ -277,7 +311,7 @@ export const actions = {
   },
   'd-tpl-new'() {
     const id = 't_' + uid();
-    S.cfg.templates.push({ id, name: 'Novo treino', weekday: 0, items: [], ...defaultRoutine('') });
+    S.cfg.templates.push({ id, name: 'Novo treino', weekday: 0, items: [], ...NEW_ROUTINE() });
     saveCfg();
     go('#definicoes/treino/' + id);
   },
@@ -297,6 +331,16 @@ export const actions = {
     (tplDraft[d.k] ||= []).push(id);
     render();
   },
+  'd-tpl-routine'() {
+    readTpl();
+    if (tplDraft.routine === 'manual' && !tplDraft.warmup.length && !tplDraft.cooldown.length) {
+      // ponto de partida: a escolha automática de hoje, para depois ajustar à mão
+      const R = routinesFor(S.cfg, { ...tplDraft, routine: 'auto' }, dateKey(), S.sessions);
+      tplDraft.warmup = R.warmup.map((x) => x.id);
+      tplDraft.cooldown = R.cooldown.map((x) => x.id);
+    }
+    render();
+  },
   'd-tpl-mob-rm'(d) { readTpl(); tplDraft[d.k].splice(+d.i, 1); render(); },
   'd-tpl-mob-mv'(d) {
     readTpl();
@@ -307,21 +351,23 @@ export const actions = {
   },
   'd-mob'(d) {
     const m = d.id ? S.cfg.mobility[d.id] : null;
-    const e = m || { name: '', kind: d.kind || 'stretch', unit: 's', val: 30, side: false, cue: '' };
+    const e = m || { name: '', kind: d.kind || 'stretch', unit: 's', val: 30, side: false, cue: '', muscles: [] };
     const body = openSheet(`<div class="sheet-title">${m ? 'Editar movimento' : 'Novo movimento'}</div>
       ${field('Nome', textInput('name', e.name, m ? '' : 'autofocus placeholder="Alongamento de peitoral"'))}
-      <div class="grid2">${field('Quando', selectInput('kind', [['warm', 'Aquecimento'], ['stretch', 'Alongamento']], e.kind))}${field('Medida', selectInput('unit', [['s', 'Segundos'], ['reps', 'Repetições']], e.unit))}</div>
+      <div class="grid2">${field('Quando', selectInput('kind', [['raise', 'Cardio leve'], ['warm', 'Aquecimento'], ['stretch', 'Alongamento']], e.kind))}${field('Medida', selectInput('unit', [['s', 'Segundos'], ['reps', 'Repetições']], e.unit))}</div>
       ${field('Valor', numInput('val', e.val, 'inputmode="numeric"'), 'Segundos a manter, ou repetições. 300 s = 5 min.')}
       ${toggle('side', e.side, 'Faz-se de cada lado')}
+      <div class="field-l mt-s">Músculos (o primeiro tocado é o principal)</div>${muscleChips(e.muscles || [])}
       ${field('Indicação', textInput('cue', e.cue, 'placeholder="Como fazer, em poucas palavras"'))}
       <div class="${m ? 'grid2' : ''} mt">${m ? `<button class="btn btn-danger" data-x="del">${icon('trash')} Apagar</button>` : ''}<button class="btn btn-gold ${m ? '' : 'btn-block'}" data-x="ok">Guardar</button></div>`);
+    const getMus = wireMuscles(body, e.muscles || []);
     body.querySelector('[data-x=ok]').onclick = async () => {
       const name = val(body, 'name').trim();
       const v = parseInt(val(body, 'val'), 10);
       if (!name) return toast('Indicar o nome');
       if (!(v > 0 && v <= 1800)) return toast('Valor entre 1 e 1800');
       const id = m?.id || 'm_' + uid();
-      S.cfg.mobility[id] = { id, name, kind: val(body, 'kind'), unit: val(body, 'unit'), val: v, side: body.querySelector('[name=side]').checked, cue: val(body, 'cue').trim() };
+      S.cfg.mobility[id] = { id, name, kind: val(body, 'kind'), unit: val(body, 'unit'), val: v, side: body.querySelector('[name=side]').checked, cue: val(body, 'cue').trim(), img: m?.img || '', muscles: getMus() };
       await saveCfg();
       closeSheet();
       toast('Guardado');
@@ -375,17 +421,19 @@ export const actions = {
       <div class="grid2">${field('Tipo', selectInput('kind', KIND, e.kind), 'Define o descanso')}${field('Incremento', numInput('inc', e.inc), 'kg (ou s no modo tempo)')}</div>
       ${field('Registo', selectInput('mode', MODE, e.mode))}
       ${toggle('perSide', e.perSide, 'Reps contadas por perna/braço')}
+      <div class="field-l mt-s">Músculos trabalhados (escolhe o aquecimento e os alongamentos)</div>${muscleChips(Object.keys(e.muscles || {}).filter((k) => e.muscles[k] >= 1))}
       ${ex ? `<div class="lbl mt">Foto</div><div class="row-g">${exThumb(ex)}
         <label class="btn btn-sm">${icon('camera')} Trocar foto<input type="file" accept="image/*" data-x="photo" hidden></label>
         ${S.photos[ex.id] ? '<button class="btn btn-sm" data-x="reset">Repor original</button>' : ''}</div>` : ''}
       <div class="${ex ? 'grid2' : ''} mt">${ex ? `<button class="btn btn-danger" data-x="del">${icon('trash')} Apagar</button>` : ''}<button class="btn btn-gold ${ex ? '' : 'btn-block'}" data-x="ok">Guardar</button></div>`);
+    const getExMus = wireMuscles(body, Object.keys(e.muscles || {}).filter((k) => e.muscles[k] >= 1));
     body.querySelector('[data-x=ok]').onclick = async () => {
       const name = val(body, 'name').trim();
       const inc = num(val(body, 'inc'));
       if (!name) return toast('Indicar o nome');
       if (!(inc > 0 && inc <= 50)) return toast('Incremento entre 0,5 e 50');
       const id = ex?.id || 'x_' + uid();
-      S.cfg.exercises[id] = { ...(ex || { img: '' }), id, name, kind: val(body, 'kind'), mode: val(body, 'mode'), inc, perSide: body.querySelector('[name=perSide]').checked };
+      S.cfg.exercises[id] = { ...(ex || { img: '' }), id, name, kind: val(body, 'kind'), mode: val(body, 'mode'), inc, perSide: body.querySelector('[name=perSide]').checked, muscles: musclesFrom(ex?.muscles || {}, getExMus()) };
       await saveCfg();
       closeSheet();
       toast('Exercício guardado');

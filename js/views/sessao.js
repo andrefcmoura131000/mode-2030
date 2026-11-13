@@ -1,8 +1,9 @@
 // Modo treino: aquecimento, um exercício de cada vez (registo da série, descanso automático), alongamentos no fim.
 import { S, saveActive, saveSession, sortSessions } from '../store.js';
-import { phase, targetSets, lastPerformance, progression, prefill, workSets, bestKg, sessionStats, doseText, routineMinutes, guideStart, guideAdvance, guidePause, guideResume } from '../logic.js';
+import { phase, targetSets, lastPerformance, progression, prefill, workSets, bestKg, sessionStats, doseText, routineMinutes, guideStart, guideAdvance, guidePause, guideResume, routinesFor, topMuscles } from '../logic.js';
+import { MUSCLES } from '../mobility-db.js';
 import { esc, fmt, fmtKg, num, mmss, uid, dateKey, round } from '../util.js';
-import { icon, exPhoto, go, goThen, render, toast, vibrate, beep, unlockAudio, keepAwake, confirmDialog, openSheet, closeSheet, numInput, field } from '../ui.js';
+import { icon, exPhoto, exThumb, go, goThen, render, toast, vibrate, beep, unlockAudio, keepAwake, confirmDialog, openSheet, closeSheet, numInput, field } from '../ui.js';
 
 export function startSession(templateId) {
   if (S.active) { go('#sessao'); return; }
@@ -10,7 +11,13 @@ export function startSession(templateId) {
   if (!tpl) return;
   const date = dateKey();
   const ph = phase(S.cfg, date);
-  const routine = (ids) => ({ ids: (ids || []).filter((id) => S.cfg.mobility?.[id]), done: {} });
+  const R = routinesFor(S.cfg, tpl, date, S.sessions);
+  const routine = (list) => ({
+    ids: list.map((x) => x.id), done: {},
+    vals: Object.fromEntries(list.map((x) => [x.id, x.val])),
+    why: Object.fromEntries(list.filter((x) => x.why === 'ontem').map((x) => [x.id, 'ontem'])),
+  });
+  const todayM = topMuscles(R.today);
   S.active = {
     id: uid(), date, templateId: tpl.id, name: tpl.name, week: ph.week, readapt: ph.readapt,
     startedAt: Date.now(), endedAt: null, cur: 0, restEnd: null, restTotal: 0, extra: false,
@@ -19,8 +26,9 @@ export function startSession(templateId) {
       target: { sets: targetSets(S.cfg, i.sets, date), repMin: i.repMin, repMax: i.repMax },
       log: [],
     })),
-    warm: routine(tpl.warmup),
-    cool: routine(tpl.cooldown),
+    warm: routine(R.warmup),
+    cool: routine(R.cooldown),
+    focus: { today: todayM, yesterday: topMuscles(R.yesterday).filter((m) => !todayM.includes(m)) },
     guide: null,
   };
   S.active.stage = S.active.warm.ids.length ? 'warm' : 'main';
@@ -61,7 +69,13 @@ export function routineSummary(s) {
 
 /* ---------- Etapas: aquecimento (-1), exercícios (0…n-1), alongamentos (n) ---------- */
 const hasR = (k) => !!S.active[k]?.ids?.length;
-const movesOf = (k) => (S.active[k]?.ids || []).map((id) => S.cfg.mobility?.[id]).filter(Boolean);
+/** Movimentos da etapa, com a duração escolhida para hoje e o motivo ("ontem"). */
+const movesOf = (k) => {
+  const R = S.active[k];
+  return (R?.ids || []).map((id) => S.cfg.mobility?.[id] && { ...S.cfg.mobility[id], val: R.vals?.[id] ?? S.cfg.mobility[id].val, why: R.why?.[id] || 'hoje' }).filter(Boolean);
+};
+const ML = Object.fromEntries(MUSCLES);
+const mList = (l) => l.map((m) => ML[m]?.toLowerCase()).filter(Boolean).join(', ');
 const rDone = (k) => { const R = S.active[k]; return R ? R.ids.filter((id) => R.done[id]).length : 0; };
 const stageOf = () => S.active.stage || 'main';
 const pos = () => (stageOf() === 'warm' ? -1 : stageOf() === 'cool' ? S.active.items.length : S.active.cur);
@@ -101,7 +115,7 @@ const ringSvg = (idT, idC, left, total, cls = '') => `<svg class="rest-ring ${cl
 
 function guidePanel(g) {
   const st = g.steps[g.s];
-  const m = S.cfg.mobility[st.id];
+  const m = movesOf(g.k).find((x) => x.id === st.id);
   if (!m) return '';
   const ids = [...new Set(g.steps.map((x) => x.id))];
   const n = ids.indexOf(st.id) + 1;
@@ -119,7 +133,8 @@ function guidePanel(g) {
           : `<button class="btn" data-act="g-pause">${paused ? 'Retomar' : 'Pausa'}</button><button class="btn" data-act="g-next">Seguinte</button><button class="btn" data-act="g-stop">Parar</button>`}</div>`;
   return `<div class="guide">
       <div class="lbl">${top}</div>
-      <div class="guide-name">${esc(m.name)}</div>
+      <div class="photo guide-photo">${exPhoto(m)}</div>
+      <div class="guide-name">${esc(m.name)}${m.why === 'ontem' ? ' <span class="tag tag-xs">ontem</span>' : ''}</div>
       <div class="mut small">${side ? `<b class="gold">${side}</b> · ` : ''}${esc(m.cue || doseText(m))}</div>
       ${body}
       ${g.phase === 'go' && !st.secs ? `<button class="btn btn-ghost btn-block mt-s" data-act="g-stop">Parar o guiado</button>` : ''}
@@ -135,19 +150,20 @@ function routineView(k) {
   const isWarm = k === 'warm';
   const curId = g ? g.steps[g.s]?.id : null;
   const tip = isWarm
-    ? 'Movimentos controlados, a aumentar a amplitude aos poucos. Depois, no primeiro exercício de cada grupo muscular, fazer 1–2 séries de aproximação (botão W) com ~50% e ~75% da carga.'
-    : 'Manter cada posição sem balanços, a expirar devagar: tensão ligeira, nunca dor. Para ganhar flexibilidade conta o total por músculo (~60 s): quando houver tempo, repetir a sequência.';
+    ? 'Escolhido para os músculos de hoje: subir a temperatura, mobilizar e ativar. Só movimentos dinâmicos (alongar parado antes de treinar pode tirar força). Depois, no primeiro exercício de cada grupo muscular, 1–2 séries de aproximação (botão W) com ~50% e ~75% da carga.'
+    : 'Manter cada posição sem balanços, a expirar devagar: tensão ligeira, nunca dor. Os músculos principais de hoje levam 60 s; os de ontem (marcados) 30 s, suaves. Para a flexibilidade conta o tempo acumulado por músculo ao longo da semana.';
   return `<div class="focus">
     ${header(A)}${segs(A)}
     <div class="stage-hero">
       <div class="lbl">${isWarm ? 'Antes dos exercícios' : 'Depois dos exercícios'}</div>
       <h1 class="ex-name">${isWarm ? 'Aquecimento' : 'Alongamentos'}</h1>
       <div class="mut ex-target">${moves.length} movimentos · ~${routineMinutes(moves)} min · ${isWarm ? 'mobilidade dinâmica' : 'estáticos, para a flexibilidade'}</div>
+      ${A.focus?.today?.length ? `<div class="small mt-s focus-m"><span class="gold">Hoje:</span> ${mList(A.focus.today)}${A.focus.yesterday?.length ? ` · <span class="mut">ontem: ${mList(A.focus.yesterday)}</span>` : ''}</div>` : ''}
     </div>
     ${g ? guidePanel(g) : !all ? `<button class="btn btn-gold btn-xl btn-block mt" data-act="g-start" data-k="${k}">${icon('play')} ${rDone(k) ? 'Continuar guiado' : 'Iniciar guiado'}</button>` : ''}
     <div class="checklist mob-list">${moves.map((m) => `<button class="check-row ${R.done[m.id] ? 'on' : ''} ${m.id === curId ? 'cur' : ''}" data-act="r-toggle" data-k="${k}" data-id="${m.id}">
         <span class="check-box">${icon(R.done[m.id] ? 'checkCircle' : 'circle')}</span>
-        <span class="check-txt">${esc(m.name)}<span class="mut small block">${esc(m.cue || '')}</span></span>
+        ${exThumb(m)}<span class="check-txt">${esc(m.name)}${m.why === 'ontem' ? ' <span class="tag tag-xs">ontem</span>' : ''}<span class="mut small block">${esc(m.cue || '')}</span></span>
         <span class="mut small tnum dose">${doseText(m)}</span></button>`).join('')}</div>
     <p class="mut small mt-s">${tip}</p>
     ${isWarm

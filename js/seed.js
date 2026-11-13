@@ -1,8 +1,9 @@
 // Dados iniciais. Tudo é editável nas Definições.
 import { dateKey } from './util.js';
 import { FOOD_DB } from './foods-db.js';
+import { MOBILITY_DB, EX_MUSCLES, OLD_MOBILITY_IDS } from './mobility-db.js';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 // kind: compound | isolation · mode: load | assisted | bodyweight | time
 // inc: menor subida disponível no material (kg; segundos no modo time)
@@ -66,70 +67,7 @@ const TEMPLATES = [
 // Base de alimentos com valores médios de referência: js/foods-db.js
 const FOODS = FOOD_DB;
 
-/* ---------- Aquecimento e alongamentos ---------- */
-// kind: warm (mobilidade dinâmica, antes) | stretch (alongamento estático, no fim)
-// unit: s (segundos) | reps · side: conta por lado (faz-se dos dois lados)
-const MB = (id, name, kind, unit, val, side, cue) => ({ id, name, kind, unit, val, side, cue });
-const MOBILITY = [
-  // Aquecimento
-  MB('cardio', 'Cardio leve (bicicleta, passadeira ou elíptica)', 'warm', 's', 300, false, 'Ritmo em que ainda se consegue falar. Só para aquecer.'),
-  MB('arm_circles', 'Círculos de braços', 'warm', 'reps', 10, false, '10 para a frente e 10 para trás, a crescer a amplitude.'),
-  MB('band_pull_apart', 'Abertura com elástico (band pull-apart)', 'warm', 'reps', 15, false, 'Braços esticados à altura do peito, juntar as omoplatas.'),
-  MB('scap_pushup', 'Flexões escapulares', 'warm', 'reps', 10, false, 'Em prancha alta, braços esticados: afastar e juntar as omoplatas.'),
-  MB('wall_slide', 'Deslizes na parede (wall slides)', 'warm', 'reps', 10, false, 'Costas e antebraços na parede, subir os braços sem arquear a lombar.'),
-  MB('thoracic_rot', 'Rotação torácica em quatro apoios', 'warm', 'reps', 8, true, 'Mão na nuca, abrir o cotovelo para o teto e seguir com o olhar.'),
-  MB('cat_cow', 'Gato-camelo', 'warm', 'reps', 10, false, 'Em quatro apoios, arredondar e arquear as costas devagar.'),
-  MB('dead_hang', 'Suspensão na barra', 'warm', 's', 20, false, 'Pendurado, ombros relaxados. Se for difícil, pés apoiados.'),
-  MB('leg_swing_fb', 'Balanço de perna frente-trás', 'warm', 'reps', 10, true, 'Apoiado numa parede, tronco direito, amplitude a crescer.'),
-  MB('leg_swing_side', 'Balanço de perna lateral', 'warm', 'reps', 10, true, 'De frente para a parede, perna a cruzar à frente do corpo.'),
-  MB('hip_9090', 'Rotação de anca 90/90', 'warm', 'reps', 6, true, 'Sentado, joelhos a 90°, rodar as pernas de um lado para o outro.'),
-  MB('ankle_mob', 'Mobilidade do tornozelo (joelho à parede)', 'warm', 'reps', 10, true, 'Levar o joelho à parede sem levantar o calcanhar.'),
-  MB('glute_bridge', 'Ponte de glúteos', 'warm', 'reps', 12, false, 'Subir a anca a apertar os glúteos, 1 s em cima.'),
-  MB('bw_squat', 'Agachamento sem peso com pausa', 'warm', 'reps', 10, false, '2 s em baixo, peito aberto, joelhos na linha dos pés.'),
-  MB('lunge_rot', 'Afundo com rotação e alcance', 'warm', 'reps', 5, true, 'Afundo largo, mão no chão, rodar e levar o outro braço ao teto.'),
-  // Alongamentos (no fim)
-  MB('chest_door', 'Peitoral na ombreira da porta', 'stretch', 's', 40, true, 'Antebraço apoiado à altura do ombro, avançar o corpo devagar.'),
-  MB('front_delt', 'Ombro anterior (mãos atrás das costas)', 'stretch', 's', 30, false, 'Entrelaçar as mãos atrás, braços esticados, abrir o peito.'),
-  MB('cross_body', 'Ombro posterior (braço cruzado)', 'stretch', 's', 30, true, 'Puxar o braço pelo cotovelo para junto do peito.'),
-  MB('triceps_oh', 'Tríceps acima da cabeça', 'stretch', 's', 30, true, 'Mão nas costas, a outra mão empurra o cotovelo para trás.'),
-  MB('lat_stretch', 'Grande dorsal (agarrado a um poste)', 'stretch', 's', 40, true, 'Agarrar à altura da anca, sentar para trás e rodar o tronco.'),
-  MB('child_pose', 'Postura da criança', 'stretch', 's', 45, false, 'Joelhos afastados, braços esticados à frente, respirar para as costas.'),
-  MB('biceps_wall', 'Bíceps e antebraço na parede', 'stretch', 's', 30, true, 'Palma na parede atrás de si, braço esticado, rodar o tronco para fora.'),
-  MB('neck_side', 'Pescoço (inclinação lateral)', 'stretch', 's', 30, true, 'Orelha ao ombro, ombro oposto descontraído para baixo.'),
-  MB('quad_stand', 'Quadríceps em pé', 'stretch', 's', 40, true, 'Calcanhar ao glúteo, joelhos juntos, anca ligeiramente para a frente.'),
-  MB('hamstring', 'Isquiotibiais sentado (uma perna)', 'stretch', 's', 45, true, 'Perna esticada, costas direitas, inclinar a partir da anca.'),
-  MB('hip_flexor', 'Flexores da anca (afundo ajoelhado)', 'stretch', 's', 45, true, 'Joelho de trás no chão, apertar o glúteo e avançar a anca.'),
-  MB('figure4', 'Glúteo (figura 4 deitado)', 'stretch', 's', 45, true, 'Tornozelo sobre o joelho oposto, puxar a perna de apoio ao peito.'),
-  MB('butterfly', 'Adutores (borboleta)', 'stretch', 's', 45, false, 'Sentado, plantas dos pés juntas, cotovelos empurram os joelhos.'),
-  MB('calf_wall', 'Gémeos na parede', 'stretch', 's', 40, true, 'Perna de trás esticada, calcanhar no chão, inclinar para a parede.'),
-  MB('cobra', 'Abdominais (cobra)', 'stretch', 's', 30, false, 'Deitado de barriga para baixo, esticar os braços e abrir o peito.'),
-];
-
-const ROUTINES = {
-  push: {
-    warmup: ['cardio', 'arm_circles', 'band_pull_apart', 'scap_pushup', 'wall_slide', 'thoracic_rot'],
-    cooldown: ['chest_door', 'front_delt', 'cross_body', 'triceps_oh', 'child_pose'],
-  },
-  pull: {
-    warmup: ['cardio', 'arm_circles', 'cat_cow', 'band_pull_apart', 'thoracic_rot', 'dead_hang'],
-    cooldown: ['lat_stretch', 'child_pose', 'biceps_wall', 'cross_body', 'neck_side'],
-  },
-  legs: {
-    warmup: ['cardio', 'leg_swing_fb', 'leg_swing_side', 'hip_9090', 'ankle_mob', 'glute_bridge', 'bw_squat'],
-    cooldown: ['quad_stand', 'hamstring', 'hip_flexor', 'figure4', 'butterfly', 'calf_wall', 'cobra'],
-  },
-  full: {
-    warmup: ['cardio', 'arm_circles', 'cat_cow', 'lunge_rot', 'leg_swing_fb', 'bw_squat'],
-    cooldown: ['chest_door', 'lat_stretch', 'quad_stand', 'hamstring', 'hip_flexor', 'child_pose'],
-  },
-};
-
-/** Aquecimento e alongamentos sugeridos a partir do nome do treino (Push / Pull / Legs / outro). */
-export function defaultRoutine(name = '') {
-  const n = name.toLowerCase();
-  const k = /push|peito|ombro|empurr/.test(n) ? 'push' : /pull|costas|puxar|dorsal/.test(n) ? 'pull' : /leg|perna|inferior|glúteo|gluteo/.test(n) ? 'legs' : 'full';
-  return { warmup: [...ROUTINES[k].warmup], cooldown: [...ROUTINES[k].cooldown] };
-}
+/* ---------- Aquecimento e alongamentos: js/mobility-db.js (escolha automática em logic.js) ---------- */
 
 export const SLOTS = [
   ['pre', 'Pré-treino'],
@@ -163,11 +101,11 @@ const SUPPS = [
 
 export function seedConfig() {
   const exercises = {};
-  for (const [id, name, kind, mode, inc, img, perSide = false] of EX) exercises[id] = { id, name, kind, mode, inc, img, perSide };
+  for (const [id, name, kind, mode, inc, img, perSide = false] of EX) exercises[id] = { id, name, kind, mode, inc, img, perSide, muscles: { ...(EX_MUSCLES[id] || {}) } };
   const foods = {};
   for (const f of FOODS) foods[f.id] = JSON.parse(JSON.stringify(f));
   const mobility = {};
-  for (const m of MOBILITY) mobility[m.id] = { ...m };
+  for (const m of MOBILITY_DB) mobility[m.id] = { ...m, muscles: [...m.muscles] };
   return {
     version: SCHEMA_VERSION,
     createdAt: Date.now(),
@@ -178,7 +116,7 @@ export function seedConfig() {
     readapt: { weeks: 2, sets: 2, suggest: false },
     sound: true,
     exercises,
-    templates: TEMPLATES.map((t) => ({ ...JSON.parse(JSON.stringify(t)), ...defaultRoutine(t.name) })),
+    templates: TEMPLATES.map((t) => ({ ...JSON.parse(JSON.stringify(t)), ...NEW_ROUTINE() })),
     mobility,
     foods,
     meals: JSON.parse(JSON.stringify(MEALS)),
@@ -191,6 +129,9 @@ export function seedConfig() {
  * Atualiza uma configuração antiga para a versão atual, sem apagar nada do que o utilizador mudou.
  * v2: base de alimentos alargada (com categorias e porções), aquecimento e alongamentos por treino.
  */
+/** Aquecimento e alongamentos de um treino: automáticos (pelos músculos de hoje e de ontem) ou listas fixas. */
+export const NEW_ROUTINE = () => ({ routine: 'auto', warmup: [], cooldown: [] });
+
 export function migrateConfig(cfg) {
   const base = seedConfig();
   for (const k of Object.keys(base)) if (cfg[k] === undefined) cfg[k] = base[k];
@@ -205,10 +146,21 @@ export function migrateConfig(cfg) {
     for (const f of Object.values(cfg.foods)) if (!f.cat) f.cat = 'outros';
     for (const [id, m] of Object.entries(base.mobility)) if (!cfg.mobility[id]) cfg.mobility[id] = m;
   }
+  if (from < 3) {
+    // biblioteca nova com fotos e músculos; movimentos criados pelo utilizador (m_…) ficam
+    for (const id of OLD_MOBILITY_IDS) delete cfg.mobility[id];
+    for (const [id, m] of Object.entries(base.mobility)) cfg.mobility[id] = m;
+    for (const t of cfg.templates) {
+      t.routine = 'auto';
+      t.warmup = (t.warmup || []).filter((id) => cfg.mobility[id]);
+      t.cooldown = (t.cooldown || []).filter((id) => cfg.mobility[id]);
+    }
+  }
+  for (const [id, ex] of Object.entries(cfg.exercises)) if (!ex.muscles) ex.muscles = { ...(EX_MUSCLES[id] || {}) };
   for (const t of cfg.templates) {
-    const d = defaultRoutine(t.name);
-    if (!Array.isArray(t.warmup)) t.warmup = d.warmup;
-    if (!Array.isArray(t.cooldown)) t.cooldown = d.cooldown;
+    if (!t.routine) t.routine = 'auto';
+    if (!Array.isArray(t.warmup)) t.warmup = [];
+    if (!Array.isArray(t.cooldown)) t.cooldown = [];
   }
   cfg.version = SCHEMA_VERSION;
   return cfg;

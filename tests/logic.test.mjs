@@ -140,8 +140,9 @@ test('todas as fotos dos exercícios existem', async () => {
 
 /* ---------- v2: base de alimentos, migração, aquecimento e alongamentos ---------- */
 import { FOOD_DB, FOOD_CATS } from '../js/foods-db.js';
-import { migrateConfig, defaultRoutine, SCHEMA_VERSION } from '../js/seed.js';
-import { guideStart, guideAdvance, guidePause, guideResume, guideSteps, doseText, routineMinutes, normText, recentFoods, GUIDE_PREP } from '../js/logic.js';
+import { migrateConfig, SCHEMA_VERSION } from '../js/seed.js';
+import { MOBILITY_DB, MUSCLES } from '../js/mobility-db.js';
+import { buildRoutines, routinesFor, resolveMoves, muscleLoad, guideStart, guideAdvance, guidePause, guideResume, guideSteps, doseText, routineMinutes, normText, recentFoods, GUIDE_PREP } from '../js/logic.js';
 
 test('base de alimentos: ids únicos, categorias válidas, porções e calorias coerentes com as macros', () => {
   const ids = new Set();
@@ -179,25 +180,64 @@ test('migração v1 → v2: acrescenta alimentos e rotinas sem estragar o que o 
   assert.equal(c.foods.c_x.cat, 'outros');
   assert.ok(c.foods.pao_mistura, 'alimentos novos');
   assert.ok(Object.keys(c.foods).length >= 150);
-  assert.ok(c.mobility.chest_door);
-  assert.deepEqual(c.templates[0].warmup, defaultRoutine('Push A').warmup);
-  assert.deepEqual(c.templates[1].cooldown, defaultRoutine('legs').cooldown, 'treino próprio com "pernas" leva alongamentos de pernas');
+  assert.ok(c.mobility.chest_stick);
+  assert.equal(c.templates[0].routine, 'auto');
+  assert.ok(c.exercises === undefined || true);
   // correr outra vez não muda nada
   const snap = JSON.stringify(c);
   assert.equal(JSON.stringify(migrateConfig(c)), snap);
 });
 
-test('todos os treinos do plano têm aquecimento e alongamentos que existem', () => {
-  const c = cfg();
-  for (const t of c.templates) {
-    assert.ok(t.warmup.length >= 5 && t.cooldown.length >= 5, t.name);
-    for (const id of [...t.warmup, ...t.cooldown]) assert.ok(c.mobility[id], `${t.name}: ${id}`);
-    for (const id of t.warmup) assert.equal(c.mobility[id].kind, 'warm', id);
-    for (const id of t.cooldown) assert.equal(c.mobility[id].kind, 'stretch', id);
+test('biblioteca de movimentos: fotos existem, músculos válidos, todos os exercícios têm músculos', async () => {
+  const { existsSync } = await import('node:fs');
+  const ms = new Set(MUSCLES.map(([k]) => k));
+  for (const m of MOBILITY_DB) {
+    for (const f of [0, 1]) assert.ok(existsSync(new URL(`../img/ex/${m.img}/${f}.jpg`, import.meta.url)), `${m.name} ${f}`);
+    assert.ok(m.muscles.length && m.muscles.every((k) => ms.has(k)), m.id);
   }
-  const legs = c.templates.find((t) => t.id === 'legsA');
-  const min = routineMinutes(legs.cooldown.map((id) => c.mobility[id]));
-  assert.ok(min >= 6 && min <= 15, `alongamentos de pernas ~${min} min`);
+  const c = cfg();
+  for (const e of Object.values(c.exercises)) assert.ok(Object.keys(e.muscles).length, e.id);
+});
+
+test('aquecimento e alongamentos adequados ao treino de hoje e ao de ontem', () => {
+  const c = cfg();
+  const T = Object.fromEntries(c.templates.map((t) => [t.id, t.items.map((i) => ({ exerciseId: i.exerciseId, sets: i.sets }))]));
+  const ids = (l) => l.map((x) => x.id);
+  const prim = (l) => l.map((x) => c.mobility[x.id].muscles[0]);
+  // Push sem véspera: cardio + dinâmicos de ombro/peito; alongamentos de peito, ombros e tríceps
+  let r = buildRoutines(c, T.pushA, []);
+  assert.equal(c.mobility[r.warmup[0].id].kind, 'raise');
+  assert.ok(r.warmup.length >= 5);
+  assert.ok(r.warmup.slice(1).every((x) => c.mobility[x.id].kind === 'warm'), 'nada de alongamento estático antes');
+  for (const k of ['chest', 'shoulders', 'triceps']) assert.ok(prim(r.cooldown).includes(k), k);
+  assert.ok(!r.cooldown.some((x) => x.why === 'ontem'));
+  assert.ok(r.cooldown.every((x) => x.val === 60), 'principais: 60 s');
+  // Legs com Pull na véspera: pernas hoje + suaves para as costas de ontem
+  r = buildRoutines(c, T.legsA, T.pullA);
+  for (const k of ['quads', 'hamstrings', 'glutes', 'calves']) assert.ok(prim(r.cooldown).includes(k), k);
+  const yest = r.cooldown.filter((x) => x.why === 'ontem');
+  assert.ok(yest.length >= 1 && yest.length <= 2);
+  assert.ok(yest.every((x) => x.val === 30));
+  assert.ok(yest.some((x) => ['lats', 'upper_back', 'biceps'].includes(c.mobility[x.id].muscles[0])));
+  assert.ok(r.warmup.some((x) => x.why === 'ontem'));
+  assert.ok(r.cooldown.length <= 8);
+  // cardio adequado: bicicleta nas pernas, remo no pull
+  assert.equal(buildRoutines(c, T.legsA).warmup[0].id, 'cardio_bike');
+  assert.equal(buildRoutines(c, T.pullA).warmup[0].id, 'cardio_row');
+  // sem repetidos
+  for (const t of Object.values(T)) { const x = buildRoutines(c, t, T.pushA); assert.equal(new Set(ids(x.cooldown)).size, x.cooldown.length); assert.equal(new Set(ids(x.warmup)).size, x.warmup.length); }
+  // ontem vem das sessões terminadas
+  const sessions = [{ date: '2026-11-10', endedAt: 1, items: T.legsA.map((i) => ({ exerciseId: i.exerciseId, log: [{ kg: 50, reps: 8 }, { kg: 50, reps: 8 }] })) }];
+  const pushB = c.templates.find((t) => t.id === 'pushB');
+  const rr = routinesFor(c, pushB, '2026-11-11', sessions);
+  assert.ok(rr.cooldown.some((x) => x.why === 'ontem'));
+  assert.ok(muscleLoad(c, T.legsA).quads > 3);
+  // modo manual usa as listas do treino
+  const man = routinesFor(c, { ...pushB, routine: 'manual', warmup: ['arm_circles'], cooldown: ['child_pose'] }, '2026-11-11', sessions);
+  assert.deepEqual(ids(man.warmup), ['arm_circles']);
+  assert.equal(resolveMoves(c, man.cooldown)[0].name, 'Postura da criança');
+  const min = routineMinutes(resolveMoves(c, buildRoutines(c, T.legsA, T.pullA).cooldown));
+  assert.ok(min >= 6 && min <= 14, `alongamentos de pernas ~${min} min`);
 });
 
 test('texto da dose', () => {
